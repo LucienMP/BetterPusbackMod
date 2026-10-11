@@ -811,6 +811,9 @@ conn_first_handler(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
 
     if (phase != xplm_CommandEnd)
         return (1);
+    /* A prepositioned tug is called in to connect (version 14). */
+    if (bp_preposition_release())
+        return (1);
     return (connect_first_begin(B_FALSE));
 }
 
@@ -1029,6 +1032,49 @@ bp_tow_call(int kind, const bp_ext_pose_t *poses, int n, char *reason,
         tow_kind_name(kind), n);
     msg_speak(MSG_SPOKEN_TOW_REQUEST,
         _(bp_ext_msg_text(BP_EXT_MSG_TOW_REQUEST)));
+    return (B_TRUE);
+}
+
+/*
+ * BetterPushback/preposition (version 14): the tug drives to the aircraft as
+ * for connect_first and waits at the nose, not connected, until
+ * BetterPushback/connect_first calls it in. False with the reason when it
+ * cannot come; nothing is left changed then.
+ */
+bool_t
+bp_preposition_call(char *reason, size_t reason_len)
+{
+    if (!bp_init()) {
+        (void)snprintf(reason, reason_len,
+            "BetterPushback cannot work with this aircraft");
+        return (B_FALSE);
+    }
+    if (bp_started) {
+        (void)snprintf(reason, reason_len, "an operation is already under way");
+        return (B_FALSE);
+    }
+    if (slave_mode) {
+        (void)snprintf(reason, reason_len,
+            "in a shared cockpit the tug is called on the master's side");
+        return (B_FALSE);
+    }
+    if (!conn_first_enable) {
+        (void)snprintf(reason, reason_len,
+            "connecting the tug first is not possible now");
+        return (B_FALSE);
+    }
+    if (get_pref_widget_status()) {
+        (void)snprintf(reason, reason_len, "the preferences window is open");
+        return (B_FALSE);
+    }
+    bp_preposition_set(B_TRUE);
+    if (connect_first_begin(B_FALSE) == 0 || !bp_started) {
+        bp_preposition_set(B_FALSE);
+        (void)snprintf(reason, reason_len, "the tug cannot come: the aircraft "
+            "must be stopped on the ground with its gear down");
+        return (B_FALSE);
+    }
+    logMsg(BP_INFO_LOG "Tug prepositioned at the aircraft by another plugin");
     return (B_TRUE);
 }
 

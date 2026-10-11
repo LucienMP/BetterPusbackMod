@@ -62,6 +62,8 @@
 #include "emergency_tow.h"
 #include "tow_session.h"
 #include "ext_api_handoff.h"
+#include "ext_api_tugpath.h"
+#include "ext_tug.h"
 #include "ext_api_state.h"
 #include "ext_api_msgs.h"
 #include "ground_ops_ui.h"
@@ -193,6 +195,14 @@ static struct {
 static bp_blocker_t bp_blocker = BP_BLOCKER_NONE;
 /* The wing walker would be shown on the running operation (version 13). */
 static bool_t walker_needed = B_FALSE;
+/* The tug's parking place and road from another plugin (version 14). */
+static bp_ext_tugpath_t tug_path;
+static bool_t tug_path_active = B_FALSE;
+static int tug_path_status = BP_EXT_TUGPATH_NONE;
+static char tug_path_reason[BP_EXT_TUGPATH_REASON_LEN] = "";
+static double drive_away_delay = MAX_DRIVING_AWAY_DELAY;
+/* Prepositioned (version 14): the tug waits at the nose until called. */
+static bool_t preposition_hold = B_FALSE;
 
 bp_state_t bp = {0};
 bp_long_state_t bp_ls = {0};
@@ -2678,6 +2688,8 @@ bp_complete(void) {
     bp_conf_set_save_enabled(!bp_started);
     late_plan_requested = B_FALSE;
     plan_complete = B_FALSE; /* BP_DATAREF plan_complete */
+    preposition_hold = B_FALSE;
+    tug_path_active = B_FALSE;
 
     if (bp_ls.tug != NULL) {
         tug_free(bp_ls.tug);
@@ -2852,6 +2864,199 @@ late_plan_end_cond(void) {
             !bp_cam_is_running()) || (slave_mode && plan_complete)); /* BP_DATAREF plan_complete */
 }
 
+static vect2_t
+geo2local(bp_ext_geo_t geo)
+{
+    double x, y, z;
+
+    XPLMWorldToLocal(geo.lat, geo.lon, 0, &x, &y, &z);
+    return (VECT2(x, -z));          /* X-Plane's Z axis is flipped to ours */
+}
+
+/*
+ * Where today's approach to the nose begins and ends. The tug crosses in
+ * front of the nose from the side it comes from: `from` is where it is
+ * before the approach.
+ */
+static void
+approach_points(vect2_t from, vect2_t *left_off, double *left_off_hdg,
+    vect2_t *p_end)
+{
+    vect2_t dir = hdg2dir(bp.cur_pos.hdg);
+    vect2_t ahead = vect2_add(bp.cur_pos.pos, vect2_scmul(dir,
+        -bp.acf.nw_z + TUG_APPCH_LONG_DIST));
+    /* Today's tug comes from the B_TRUE side and stops on the other. */
+    bool_t from_true_side = vect2_dotprod(vect2_norm(dir, B_TRUE),
+        vect2_sub(from, ahead)) >= 0;
+
+    *left_off = vect2_add(ahead, vect2_scmul(vect2_norm(dir, !from_true_side),
+        2 * bp_ls.tug->veh.wheelbase));
+    *left_off_hdg = normalize_hdg(bp.cur_pos.hdg + (from_true_side ? -90 : 90));
+    *p_end = vect2_add(bp.cur_pos.pos, vect2_scmul(dir,
+        (-bp.acf.nw_z) + bp_ls.tug->info->apch_dist));
+}
+
+/*
+ * Plans the tug's drive in: from its parking place along the other plugin's
+ * road and into today's approach. False when the tug cannot drive it within
+ * its turning limits; the tug is then left at its parking place, nothing
+ * planned.
+ */
+static bool_t
+tug_path_plan_in(void)
+{
+    vect2_t origin = geo2local(tug_path.origin);
+    vect2_t last = (tug_path.n > 0) ?
+        geo2local(tug_path.way[tug_path.n - 1]) : origin;
+    vect2_t left_off, p_end;
+    double left_off_hdg;
+
+    approach_points(last, &left_off, &left_off_hdg, &p_end);
+    tug_set_pos(bp_ls.tug, origin, tug_path.origin_hdg, 0);
+    for (int i = 0; i < tug_path.n; i++) {
+        vect2_t p = geo2local(tug_path.way[i]);
+        vect2_t next = (i + 1 < tug_path.n) ?
+            geo2local(tug_path.way[i + 1]) : left_off;
+
+        if (!tug_drive2point(bp_ls.tug, p, dir2hdg(vect2_sub(next, p)))) {
+            tug_set_pos(bp_ls.tug, origin, tug_path.origin_hdg, 0);
+            return (B_FALSE);
+        }
+    }
+    if (!tug_drive2point(bp_ls.tug, left_off, left_off_hdg) ||
+        !tug_drive2point(bp_ls.tug, p_end, bp.cur_pos.hdg)) {
+        tug_set_pos(bp_ls.tug, origin, tug_path.origin_hdg, 0);
+        return (B_FALSE);
+    }
+    return (B_TRUE);
+}
+
+/*
+ * Plans the drive back: the road the other way, then the parking place, where
+ * the tug is put away. False when it cannot be driven; nothing is planned.
+ */
+static bool_t
+tug_path_plan_out(void)
+{
+    vect2_t at = bp_ls.tug->pos.pos;
+    vect2_t origin = geo2local(tug_path.origin);
+    double len = 0;
+
+    for (int i = tug_path.n - 1; i >= -1; i--) {
+        vect2_t p = (i >= 0) ? geo2local(tug_path.way[i]) : origin;
+        vect2_t next = (i >= 1) ? geo2local(tug_path.way[i - 1]) : origin;
+        double hdg = (i >= 0) ? dir2hdg(vect2_sub(next, p)) :
+            dir2hdg(vect2_sub(p, at));
+
+        if (!tug_drive2point(bp_ls.tug, p, hdg)) {
+            tug_set_pos(bp_ls.tug, bp_ls.tug->pos.pos, bp_ls.tug->pos.hdg, 0);
+            return (B_FALSE);
+        }
+        len += vect2_abs(vect2_sub(p, at));
+        at = p;
+    }
+    drive_away_delay = bp_ext_tugpath_drive_time(len,
+        bp_ls.tug->veh.max_fwd_spd, MAX_DRIVING_AWAY_DELAY);
+    return (B_TRUE);
+}
+
+/*
+ * Whether the tug comes from the parking place another plugin wrote in
+ * bp/tug_path_in. Without one, or when it cannot be used, the tug comes as it
+ * always has; the reason is published and logged.
+ */
+static void
+tug_path_choose(void)
+{
+    double lat, lon, alt;
+    bp_ext_geo_t acf;
+
+    tug_path_active = B_FALSE;
+    if (!bp_ext_tugpath_parse(ext_tug_path_text(), &tug_path,
+        tug_path_reason, sizeof (tug_path_reason))) {
+        tug_path_status = (tug_path_reason[0] != '\0') ?
+            BP_EXT_TUGPATH_REFUSED : BP_EXT_TUGPATH_NONE;
+    } else {
+        XPLMLocalToWorld(bp.cur_pos.pos.x, dr_getf(&drs.local_y),
+            -bp.cur_pos.pos.y, &lat, &lon, &alt);
+        acf.lat = lat;
+        acf.lon = lon;
+        if (!bp_ext_tugpath_usable(&tug_path, acf, tug_path_reason,
+            sizeof (tug_path_reason))) {
+            tug_path_status = BP_EXT_TUGPATH_REFUSED;
+        } else if (!tug_path_plan_in()) {
+            (void)snprintf(tug_path_reason, sizeof (tug_path_reason),
+                "the tug cannot drive this road within its turning limits");
+            tug_path_status = BP_EXT_TUGPATH_REFUSED;
+        } else {
+            /* Planned to know it can be driven; it waits until started. */
+            tug_set_pos(bp_ls.tug, geo2local(tug_path.origin),
+                tug_path.origin_hdg, 0);
+            tug_path_active = B_TRUE;
+            tug_path_status = BP_EXT_TUGPATH_USED;
+            tug_path_reason[0] = '\0';
+            logMsg(BP_INFO_LOG "The tug comes from \"%s\" along %d road "
+                "points", tug_path.name, tug_path.n);
+        }
+    }
+    if (tug_path_status == BP_EXT_TUGPATH_REFUSED) {
+        logMsg(BP_WARN_LOG "The tug path from another plugin is not used: %s",
+            tug_path_reason);
+    }
+}
+
+int
+bp_tug_path_status(void)
+{
+    return (tug_path_status);
+}
+
+const char *
+bp_tug_path_reason(void)
+{
+    return (tug_path_reason);
+}
+
+const char *
+bp_tug_origin_name(void)
+{
+    if (!bp_started || !tug_path_active)
+        return ("");
+    return (tug_path.name[0] != '\0' ? tug_path.name : "parking");
+}
+
+bool_t
+bp_tug_at_parking(void)
+{
+    return (bp_started && tug_path_active && bp_ls.tug != NULL &&
+        (bp.step == PB_STEP_TUG_LOAD || (bp.step == PB_STEP_START &&
+        tug_is_stopped(bp_ls.tug))));
+}
+
+void
+bp_preposition_set(bool_t on)
+{
+    preposition_hold = on;
+}
+
+bool_t
+bp_prepositioned(void)
+{
+    return (bp_started && preposition_hold &&
+        bp.step == PB_STEP_DRIVING_UP_CLOSE && bp_ls.tug != NULL &&
+        tug_is_stopped(bp_ls.tug));
+}
+
+bool_t
+bp_preposition_release(void)
+{
+    if (!bp_started || !preposition_hold)
+        return (B_FALSE);
+    preposition_hold = B_FALSE;
+    logMsg(BP_INFO_LOG "The prepositioned tug is called in to connect");
+    return (B_TRUE);
+}
+
 static bool_t
 pb_step_tug_load(void) {
     bool_t tug_starts_next_plane = B_FALSE;
@@ -2947,7 +3152,13 @@ pb_step_tug_load(void) {
             "wing-walker object will be loaded or rendered");
     }
     telemetry_start();
-    if (!bp_ls.tug->info->drive_debug) {
+    drive_away_delay = MAX_DRIVING_AWAY_DELAY;
+    tug_path_active = B_FALSE;
+    if (!bp_ls.tug->info->drive_debug && !slave_mode)
+        tug_path_choose();
+    if (tug_path_active) {
+        /* At its parking place (tug_path_choose), until it is started. */
+    } else if (!bp_ls.tug->info->drive_debug) {
         vect2_t p_start, dir;
         dir = hdg2dir(bp.cur_pos.hdg);
         if (tug_starts_next_plane) {
@@ -2973,7 +3184,23 @@ pb_step_tug_load(void) {
 
 static void
 pb_step_start(void) {
-    if (!bp_ls.tug->info->drive_debug) {
+    if (tug_path_active && !tug_path_plan_in()) {
+        /* Driven in tug_path_choose; should the aircraft have moved since. */
+        logMsg(BP_WARN_LOG "The tug cannot drive its road now; it comes "
+            "the usual way");
+        tug_path_active = B_FALSE;
+        tug_path_status = BP_EXT_TUGPATH_REFUSED;
+        (void)snprintf(tug_path_reason, sizeof (tug_path_reason),
+            "the tug cannot drive this road within its turning limits");
+        tug_set_pos(bp_ls.tug, vect2_add(vect2_add(bp.cur_pos.pos,
+            vect2_scmul(hdg2dir(bp.cur_pos.hdg), -bp.acf.nw_z +
+            TUG_APPCH_LONG_DIST)), vect2_scmul(vect2_norm(hdg2dir(
+            bp.cur_pos.hdg), B_TRUE), 10 * bp_ls.tug->veh.wheelbase)),
+            normalize_hdg(bp.cur_pos.hdg - 90), bp_ls.tug->veh.max_fwd_spd);
+    }
+    if (tug_path_active) {
+        /* Planned by tug_path_plan_in: from the parking place, along the road. */
+    } else if (!bp_ls.tug->info->drive_debug) {
         vect2_t left_off, p_end, dir;
         bool_t tug_starts_next_plane = B_FALSE;
         (void) conf_get_b(bp_conf,"tug_starts_next_plane", &tug_starts_next_plane);
@@ -3016,7 +3243,7 @@ pb_step_start(void) {
 
 static void
 pb_step_driving_up_close(void) {
-    if (!tug_is_stopped(bp_ls.tug)) {
+    if (!tug_is_stopped(bp_ls.tug) || preposition_hold) {
         /*
          * Keep resetting the start time to enforce the state
          * transition delay once the tug stops.
@@ -4389,45 +4616,12 @@ drive_away_fallback(void) {
     VERIFY(tug_drive2point(bp_ls.tug, end_p, bp_ls.tug->pos.hdg));
 }
 
+/* The tug drives back towards where the push started, as it always has. */
 static void
-pb_step_clear_signal(void) {
+drive_away_default(void) {
     double acf2start_lat_displ, acf2start_long_displ;
     vect2_t acf2start, acfdir;
 
-    tug_set_clear_signal(B_TRUE, tug_clear_is_right());
-    bp.clear_signal_gate.displayed = true;
-
-    if (bp_interface_mode_uses_legacy_magic_squares(
-        bp_get_interface_mode())) {
-        /* The original interface displayed the pin/clear signal for the
-         * minimum delay and then departed without a separate acknowledgement. */
-        (void)bp_clear_signal_acknowledge(&bp.clear_signal_gate, true);
-    } else if (bp_post_push_auto_acknowledge_clear(&bp.clear_signal_gate,
-        cfg_disco_when_done != B_FALSE, slave_mode != B_FALSE)) {
-        logMsg(BP_INFO_LOG "Automatic post-push pin and clear signal acknowledged");
-    }
-
-    /* Preserve the legacy minimum display time in both workflow modes. */
-    if (!bp_clear_signal_can_depart(&bp.clear_signal_gate,
-        bp.cur_t - bp.step_start_t))
-        return;
-
-    /*
-     * In order to determine if we should be even attempting to reach
-     * our starting point, we make sure that start_pos isn't within a
-     * box as follows:
-     *                 -4 x wheelbase
-     *                   |<----->|
-     *                   |       |
-     *           ------- +-------+------------------>>> (to infinity)
-     *  1.5x     ^       |
-     * wheelbase |       |       |
-     *           v______ |   |___|__
-     *                   |   |   |
-     *                   |       |
-     *                   |
-     *                   +-------------------------->>>
-     */
     acf2start = vect2_sub(bp.start_pos, bp.cur_pos.pos);
     acfdir = hdg2dir(bp.cur_pos.hdg);
     acf2start_lat_displ = fabs(vect2_dotprod(vect2_norm(acfdir, B_TRUE),
@@ -4467,6 +4661,47 @@ pb_step_clear_signal(void) {
             }
         }
     }
+}
+
+static void
+pb_step_clear_signal(void) {
+    tug_set_clear_signal(B_TRUE, tug_clear_is_right());
+    bp.clear_signal_gate.displayed = true;
+
+    if (bp_interface_mode_uses_legacy_magic_squares(
+        bp_get_interface_mode())) {
+        /* The original interface displayed the pin/clear signal for the
+         * minimum delay and then departed without a separate acknowledgement. */
+        (void)bp_clear_signal_acknowledge(&bp.clear_signal_gate, true);
+    } else if (bp_post_push_auto_acknowledge_clear(&bp.clear_signal_gate,
+        cfg_disco_when_done != B_FALSE, slave_mode != B_FALSE)) {
+        logMsg(BP_INFO_LOG "Automatic post-push pin and clear signal acknowledged");
+    }
+
+    /* Preserve the legacy minimum display time in both workflow modes. */
+    if (!bp_clear_signal_can_depart(&bp.clear_signal_gate,
+        bp.cur_t - bp.step_start_t))
+        return;
+
+    /*
+     * In order to determine if we should be even attempting to reach
+     * our starting point, we make sure that start_pos isn't within a
+     * box as follows:
+     *                 -4 x wheelbase
+     *                   |<----->|
+     *                   |       |
+     *           ------- +-------+------------------>>> (to infinity)
+     *  1.5x     ^       |
+     * wheelbase |       |       |
+     *           v______ |   |___|__
+     *                   |   |   |
+     *                   |       |
+     *                   |
+     *                   +-------------------------->>>
+     */
+    /* Back along the other plugin's road to its parking place, if it came so. */
+    if (!tug_path_active || !tug_path_plan_out())
+        drive_away_default();
     tug_set_clear_signal(B_FALSE, B_FALSE);
     bp.step++;
     bp.step_start_t = bp.cur_t;
@@ -4691,7 +4926,9 @@ bp_run(float elapsed, float elapsed2, int counter, void *refcon) {
           }
             break;
         case PB_STEP_DRIVING_UP_CLOSE:
-            bp_hint_status_str = _("Driving to the aircraft");
+            bp_hint_status_str = bp_prepositioned() ?
+                _("Tug in position; waiting to be called to connect") :
+                _("Driving to the aircraft");
             pb_step_driving_up_close();
             break;
         case PB_STEP_WAITING_FOR_DOORS:
@@ -4883,7 +5120,7 @@ bp_run(float elapsed, float elapsed2, int counter, void *refcon) {
         case PB_STEP_DRIVING_AWAY:
             bp_hint_status_str = _("Driving the tug away back to his station");
             if (tug_is_stopped(bp_ls.tug) ||
-                bp.cur_t - bp.step_start_t > MAX_DRIVING_AWAY_DELAY) {
+                bp.cur_t - bp.step_start_t > drive_away_delay) {
                 bp_complete();
                 bp_hint_status_str = NULL;
 

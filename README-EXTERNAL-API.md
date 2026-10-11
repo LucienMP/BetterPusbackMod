@@ -33,7 +33,7 @@ a pilot who uses it on its own.
 
 | Dataref | Type | Meaning |
 | --- | --- | --- |
-| `bp/api_version` | int | Interface version (this document: 13) |
+| `bp/api_version` | int | Interface version (this document: 14) |
 | `bp/state_seq` | int | Changes whenever a value below changes |
 | `bp/started` | int | An operation is running (existing dataref) |
 | `bp/emergency_tow` | int | The running operation is the Emergency Tow |
@@ -517,11 +517,11 @@ The tug's state and the milestones are part of the operation state:
 
 | Dataref | Type | Meaning |
 | --- | --- | --- |
-| `bp/tug_state` | int | 0 none, 1 at its parking (a later version), 2 driving in, 3 at the stand waiting to connect, 4 connecting, 5 connected, 6 moving (pushing or towing, stopping at the end), 7 disconnecting (lowering, moving clear), 8 returning (driving away) |
+| `bp/tug_state` | int | 0 none, 1 at its parking (version 14, with a tug path), 2 driving in, 3 at the stand waiting to connect (also while prepositioned, version 14), 4 connecting, 5 connected, 6 moving (pushing or towing, stopping at the end), 7 disconnecting (lowering, moving clear), 8 returning (driving away) |
 | `bp/tug_state_name` | byte[16] | `none`, `at_parking`, `driving_in`, `at_stand`, `connecting`, `connected`, `moving`, `disconnecting`, `returning` |
 | `bp/tug_lat`, `bp/tug_lon`, `bp/tug_hdg` | float | Where the tug is and its true heading; 0 when there is no tug |
 | `bp/tug_eta_s` | float | Seconds until the tug reaches the aircraft while driving in; 0 once there; -1 without a tug |
-| `bp/tug_origin` | byte[48] | Where the tug came from (its parking's name); empty until the tug drives from a real parking (a later version) |
+| `bp/tug_origin` | byte[48] | Where the tug came from: the name of the parking place in `bp/tug_path_in` (version 14), "parking" when it has none; empty when the tug comes the usual way |
 | `bp/tug_eta_if_called_s` | float | Before the tug is called: seconds from calling it until it would be connected (an estimate); -1 once it is called |
 | `bp/connect_time_s` | float | Seconds from the tug's arrival to connected (an estimate) |
 | `bp/route_time_s` | float | Seconds to drive the current route at the tug's speeds, with the stops and pauses at each change of direction; -1 without a route |
@@ -530,8 +530,8 @@ The tug's state and the milestones are part of the operation state:
 | `bp/time_tug_clear` | float | Zulu seconds when the tug, disconnected, drove away; -1 before |
 
 The times are kept after the operation until the next one starts. The
-estimates before calling the tug use today's drive-up; they become
-truthful per airport once the tug drives from a real parking.
+estimates before calling the tug use today's drive-up, or from version 14
+the length of the road in `bp/tug_path_in` when one is written.
 
 ## Version 13: what another plugin takes over
 
@@ -556,6 +556,50 @@ BetterPushback what only it knows.
 - All three take effect for the next operation if set while one is running,
   except the blocker, which acts at once.
 - Without another plugin nothing changes: the defaults are 0.
+
+## Version 14: where the tug comes from, and the prepositioned tug
+
+BetterPushback does not know an airport's service roads. A plugin that does
+(a ground-handling plugin reading the airport's ground-vehicle network) can
+tell it where the tug parks and which road it takes to the stand. The tug
+then waits at that parking place, drives the road to the aircraft, and after
+the push drives the same road back and is put away there.
+
+| Dataref | Type | Written by | Meaning |
+| --- | --- | --- | --- |
+| `bp/tug_path_in` | byte[2048], writable | the other plugin | The tug's parking place and road, in the text form below; read when the tug is called |
+| `bp/tug_path_status` | int | BetterPushback | For the last tug called: 0 no path written (the usual way), 1 the path was used, 2 it was not; `bp/tug_path_reason` says why |
+| `bp/tug_path_reason` | byte[128] | BetterPushback | Why the path was not used ("line 3: expected \"W <latitude> <longitude>\"", "the origin is more than 3000 m from the aircraft", "the tug cannot drive this road within its turning limits") |
+| `bp/prepositioned` | int | BetterPushback | 1 while a prepositioned tug waits at the nose to be called in |
+
+The text:
+
+```
+BPTUG 1
+# comments and blank lines are allowed
+O 47.25981 11.34567 270 Tug parking West
+W 47.26010 11.34612
+W 47.26044 11.34650
+```
+
+- `O <latitude> <longitude> <heading> [name]`: the parking place, once. The
+  name is shown in `bp/tug_origin`.
+- `W <latitude> <longitude>`: a point on the road, in the order the tug
+  drives in; up to 32. None: the tug drives from its parking straight to the
+  stand.
+- Every point must be within 3 km of the aircraft. From the last point the
+  tug makes its usual approach, crossing in front of the nose from the side
+  it comes from.
+- When the path cannot be used, the tug comes the usual way, and
+  `bp/tug_path_status` and the log say why. A path is never half driven.
+- The way back is the road in reverse. The tug is given time to drive it
+  (the usual 30 seconds plus the road at half the tug's speed) before it is
+  put away, wherever it is then.
+- In a shared cockpit the path is used on the master's side only.
+
+| Command | Meaning |
+| --- | --- |
+| `BetterPushback/preposition` | Bring the tug to the aircraft to wait, not connected: it drives up as for `connect_first`, stops at the nose (`bp/tug_state` 3, `bp/prepositioned` 1) and waits, before the doors are checked. `BetterPushback/connect_first` then calls it in to connect, and the operation goes on as after `connect_first`; `BetterPushback/stop` sends it away. Answered like `load_route`; refused, with the reason, when an operation is already under way or the tug cannot come |
 
 ## Testing
 
@@ -584,6 +628,10 @@ All run as part of `tests/run_all_tests.sh`:
   default, that an external blocker holds the connection and the start with
   the other plugin's words (a text it did not terminate is cut), and that
   chocks and walkers left to the other plugin behave as described.
+- `tests/run_ext_api_tugpath_tests.sh` checks that a path is read, that an
+  empty one is no path and no complaint, that each mistake is named with its
+  line, that a path far from the aircraft is refused, and the road's length
+  and the time allowed for the drive back.
 - `tests/run_ext_api_tug_tests.sh` checks the tug's state for every step
   (never going back during an operation), the route time with its stops and
   pauses at each change of direction, the arrival estimate, and that each

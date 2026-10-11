@@ -90,6 +90,7 @@ void bp_emergency_tow_planner_notify(void);
 
 void bp_emergency_tow_session_end_notify(bool_t completed);
 /* Another plugin's tow (tow_session.h): loads the route and calls the tug. */
+bool_t bp_preposition_call(char *reason, size_t reason_len);
 bool_t bp_tow_call(int kind, const bp_ext_pose_t *poses, int n, char *reason,
     size_t reason_len);
 void bp_tow_session_end_notify(bool_t completed);

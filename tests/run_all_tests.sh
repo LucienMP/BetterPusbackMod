@@ -11,6 +11,7 @@ for runner in \
     run_ext_api_route_tests.sh \
     run_ext_api_state_tests.sh \
     run_ext_api_tug_tests.sh \
+    run_ext_api_tugpath_tests.sh \
     run_ext_api_voice_tests.sh \
     run_gate_route_math_tests.sh \
     run_gate_route_slots_tests.sh \

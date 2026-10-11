@@ -15,6 +15,7 @@
 
 #include "bp.h"
 #include "ext_api_tug.h"
+#include "ext_api_tugpath.h"
 #include "ext_tug.h"
 
 /* Before the tug is called: the drive-up the tug makes today, and connecting. */
@@ -32,7 +33,16 @@ static float route_time = -1;
 static float time_off_blocks = -1, time_push_complete = -1, time_tug_clear = -1;
 static bp_ext_milestones_t milestones;
 static int last_step = PB_STEP_OFF;
-static dr_t zulu_dr;
+static dr_t zulu_dr, lat_dr, lon_dr;
+/* Version 14: the tug's parking place and road, and the prepositioned tug. */
+static char tug_path_in[BP_EXT_TUGPATH_TEXT_LEN] = "";
+static int tug_path_status = BP_EXT_TUGPATH_NONE;
+static char tug_path_reason[BP_EXT_TUGPATH_REASON_LEN] = "";
+static int prepositioned = 0;
+static dr_t tug_path_in_dr, tug_path_status_dr, tug_path_reason_dr,
+    prepositioned_dr;
+/* An estimate for the drive in along a road, before the tug is chosen. */
+#define ROAD_SPEED_MPS 6.0
 
 static dr_t tug_state_dr, tug_state_name_dr, tug_eta_dr, tug_lat_dr, tug_lon_dr,
     tug_hdg_dr, tug_origin_dr, eta_if_called_dr, connect_time_dr, route_time_dr,
@@ -50,6 +60,32 @@ refresh_route_time(void)
         REVERSE_PAUSE_S) : -1.0f;
 }
 
+const char *
+ext_tug_path_text(void)
+{
+    /* Written by another plugin: never trusted to be terminated. */
+    tug_path_in[sizeof (tug_path_in) - 1] = '\0';
+    return (tug_path_in);
+}
+
+/* Seconds to drive in along the road written now, or the usual drive-up. */
+static double
+drive_up_time(void)
+{
+    bp_ext_tugpath_t path;
+    bp_ext_geo_t acf;
+    char reason[BP_EXT_TUGPATH_REASON_LEN];
+
+    acf.lat = dr_getf(&lat_dr);
+    acf.lon = dr_getf(&lon_dr);
+    if (!bp_ext_tugpath_parse(ext_tug_path_text(), &path, reason,
+        sizeof (reason)) || !bp_ext_tugpath_usable(&path, acf, reason,
+        sizeof (reason)))
+        return (DRIVE_UP_TIME_S);
+    return (bp_ext_tugpath_drive_time(bp_ext_tugpath_length(&path, acf),
+        ROAD_SPEED_MPS, DRIVE_UP_TIME_S));
+}
+
 bool_t
 ext_tug_refresh(void)
 {
@@ -64,6 +100,22 @@ ext_tug_refresh(void)
         changed = B_TRUE;
     }
     last_step = step;
+
+    /* Version 14: waiting at its parking place, or at the nose. */
+    if (state == BP_EXT_TUG_DRIVING_IN && bp_tug_at_parking())
+        state = BP_EXT_TUG_AT_PARKING;
+    if (bp_prepositioned())
+        state = BP_EXT_TUG_AT_STAND;
+    changed = changed || (state != tug_state);
+    if (bp_tug_path_status() != tug_path_status ||
+        (bp_prepositioned() ? 1 : 0) != prepositioned)
+        changed = B_TRUE;
+    tug_path_status = bp_tug_path_status();
+    (void)snprintf(tug_path_reason, sizeof (tug_path_reason), "%s",
+        bp_tug_path_reason());
+    prepositioned = bp_prepositioned() ? 1 : 0;
+    (void)snprintf(tug_origin, sizeof (tug_origin), "%s",
+        bp_tug_origin_name());
 
     tug_state = state;
     (void)snprintf(tug_state_name, sizeof (tug_state_name), "%s",
@@ -83,7 +135,7 @@ ext_tug_refresh(void)
 
     /* Before the tug is called, how long until it would be connected. */
     eta_if_called = (state == BP_EXT_TUG_NONE) ?
-        (float)(DRIVE_UP_TIME_S + CONNECT_TIME_S) : -1.0f;
+        (float)(drive_up_time() + CONNECT_TIME_S) : -1.0f;
     refresh_route_time();
 
     {
@@ -111,6 +163,16 @@ ext_tug_init(void)
         return;
     bp_ext_milestones_reset(&milestones);
     fdr_find(&zulu_dr, "sim/time/zulu_time_sec");
+    fdr_find(&lat_dr, "sim/flightmodel/position/latitude");
+    fdr_find(&lon_dr, "sim/flightmodel/position/longitude");
+    dr_create_b(&tug_path_in_dr, tug_path_in, sizeof (tug_path_in), B_TRUE,
+        "bp/tug_path_in");
+    dr_create_i(&tug_path_status_dr, &tug_path_status, B_FALSE,
+        "bp/tug_path_status");
+    dr_create_b(&tug_path_reason_dr, tug_path_reason,
+        sizeof (tug_path_reason), B_FALSE, "bp/tug_path_reason");
+    dr_create_i(&prepositioned_dr, &prepositioned, B_FALSE,
+        "bp/prepositioned");
     dr_create_i(&tug_state_dr, &tug_state, B_FALSE, "bp/tug_state");
     dr_create_b(&tug_state_name_dr, tug_state_name, sizeof (tug_state_name),
         B_FALSE, "bp/tug_state_name");
@@ -150,5 +212,9 @@ ext_tug_fini(void)
     dr_delete(&off_blocks_dr);
     dr_delete(&push_complete_dr);
     dr_delete(&tug_clear_dr);
+    dr_delete(&tug_path_in_dr);
+    dr_delete(&tug_path_status_dr);
+    dr_delete(&tug_path_reason_dr);
+    dr_delete(&prepositioned_dr);
     inited = B_FALSE;
 }

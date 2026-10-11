@@ -16,6 +16,8 @@ void ext_tug_init(void);
 void ext_tug_fini(void);
 /* Refreshes the published values; true when bp/state_seq should move. */
 bool_t ext_tug_refresh(void);
+/* Version 14: the text another plugin wrote into bp/tug_path_in. */
+const char *ext_tug_path_text(void);
 
 #ifdef __cplusplus
 }

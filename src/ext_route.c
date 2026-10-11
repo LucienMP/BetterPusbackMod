@@ -52,6 +52,7 @@ static dr_t route_in_dr, route_current_dr, route_reason_dr;
 static dr_t route_seq_dr, route_status_dr;
 static dr_t route_source_dr, route_source_name_dr;
 static XPLMCommandRef load_cmd = NULL, check_cmd = NULL, clear_cmd = NULL;
+static XPLMCommandRef preposition_cmd = NULL;
 
 /* Saved routes (version 6). */
 static int route_slot = 1;                 /* written by the other plugin */
@@ -160,6 +161,25 @@ continue_tow_cb(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
     if (phase != xplm_CommandBegin)
         return (1);
     if (!bp_continue_from_hold(reason, sizeof (reason))) {
+        answer(B_FALSE, reason);
+        return (1);
+    }
+    ext_route_refresh();
+    answer(B_TRUE, "");
+    return (1);
+}
+
+/* BetterPushback/preposition: the tug comes and waits at the nose. */
+static int
+preposition_cb(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
+{
+    char reason[BP_EXT_ROUTE_REASON_LEN] = "";
+
+    (void)cmd;
+    (void)refcon;
+    if (phase != xplm_CommandBegin)
+        return (1);
+    if (!bp_preposition_call(reason, sizeof (reason))) {
         answer(B_FALSE, reason);
         return (1);
     }
@@ -408,6 +428,9 @@ ext_route_init(void)
     emergency_stop_cmd = XPLMCreateCommand("BetterPushback/emergency_stop",
         _("Stop the push or tow at once, the tug kept connected"));
     XPLMRegisterCommandHandler(emergency_stop_cmd, emergency_stop_cb, 1, NULL);
+    preposition_cmd = XPLMCreateCommand("BetterPushback/preposition",
+        _("Bring the tug to the aircraft to wait, not yet connected"));
+    XPLMRegisterCommandHandler(preposition_cmd, preposition_cb, 1, NULL);
     inited = B_TRUE;
 }
 
@@ -424,6 +447,7 @@ ext_route_fini(void)
     XPLMUnregisterCommandHandler(call_tow_cmd, call_tow_cb, 1, NULL);
     XPLMUnregisterCommandHandler(continue_tow_cmd, continue_tow_cb, 1, NULL);
     XPLMUnregisterCommandHandler(emergency_stop_cmd, emergency_stop_cb, 1, NULL);
+    XPLMUnregisterCommandHandler(preposition_cmd, preposition_cb, 1, NULL);
     dr_delete(&hold_dr);
     dr_delete(&hold_reason_dr);
     dr_delete(&tow_kind_dr);

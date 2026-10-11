@@ -259,6 +259,17 @@ double bp_tug_distance_to_aircraft(void);
 int bp_route_legs(bp_ext_leg_t *legs, int max);
 /* The speeds the route will be driven at (m/s) and the acceleration (m/s^2). */
 void bp_route_speeds(double *fwd, double *rev, double *accel);
+/*
+ * Version 14: the tug's parking place and road from another plugin
+ * (bp/tug_path_in, ext_api_tugpath.h), and the prepositioned tug.
+ */
+int bp_tug_path_status(void);           /* bp_ext_tugpath_status_t */
+const char *bp_tug_path_reason(void);
+const char *bp_tug_origin_name(void);   /* "" unless it came from a parking */
+bool_t bp_tug_at_parking(void);         /* waiting there, not yet driving */
+void bp_preposition_set(bool_t on);
+bool_t bp_prepositioned(void);          /* at the nose, waiting to connect */
+bool_t bp_preposition_release(void);    /* false when nothing was held */
 /* The wing walker would be shown on this operation (published as
  * bp/walkers_needed when another plugin draws the walkers). */
 bool_t bp_walker_needed(void);
