@@ -33,7 +33,7 @@ a pilot who uses it on its own.
 
 | Dataref | Type | Meaning |
 | --- | --- | --- |
-| `bp/api_version` | int | Interface version (this document: 7) |
+| `bp/api_version` | int | Interface version (this document: 8) |
 | `bp/state_seq` | int | Changes whenever a value below changes |
 | `bp/started` | int | An operation is running (existing dataref) |
 | `bp/emergency_tow` | int | The running operation is the Emergency Tow |
@@ -275,21 +275,22 @@ P 47.79240000 12.99690000 270.0
 
 - Each `P` line is `latitude longitude heading`: the aircraft's reference
   point (the position X-Plane reports for the aircraft) and its true heading
-  there. Up to 16 positions; lines starting with `#` are comments.
+  there. Up to 64 positions (16 before version 8); lines starting with `#`
+  are comments.
 - BetterPushback fits each leg from the previous position (the first from
   where the aircraft stands) within the aircraft's turning limits: a position
   behind the aircraft is reached by pushing, one ahead by towing.
 
 | Dataref / command | Type | Meaning |
 | --- | --- | --- |
-| `bp/route_in` | byte[2048], writable | Write the route text here, zero-terminated |
+| `bp/route_in` | byte[4096], writable | Write the route text here, zero-terminated (byte[2048] before version 8) |
 | `BetterPushback/load_route` | command | Load `bp/route_in` as the current route |
 | `BetterPushback/check_route` | command | Check whether `bp/route_in` fits, changing nothing (see below) |
 | `BetterPushback/clear_route` | command | Remove the current route |
 | `bp/route_seq` | int | Goes up by one with every load, check or clear, accepted or not |
 | `bp/route_status` | int | Answer to the last load, check or clear: 1 accepted (fits), 2 rejected (0 before any) |
 | `bp/route_reason` | byte[128] | Why it was rejected, e.g. "position 2 cannot be reached from the one before it within this aircraft's turning limits" |
-| `bp/route_current` | byte[2048] | The current route, in the same text form (empty when there is none) |
+| `bp/route_current` | byte[4096] | The current route, in the same text form (empty when there is none) |
 | `bp/route_source` | int | Where the current route came from: 0 none, 1 planner (drawn, changed or accepted there), 2 saved slot (taken unchanged), 3 external (`load_route`) |
 | `bp/route_source_name` | byte[16] | `none`, `planner`, `saved` or `external` |
 
@@ -378,6 +379,34 @@ would have said it. Without chocks nothing changes. A plugin that speaks the
 lines (version 4) should therefore treat lines 19 to 22 as push-start lines,
 like 8 to 11.
 
+## Version 8: routes along taxiways
+
+Tows often follow a taxi route rather than a few chosen positions. Route
+text version 2 adds two kinds of line for that, and a route may now hold up
+to 64 positions (`bp/route_in` and `bp/route_current` grow to 4096 bytes).
+
+```
+BPROUTE 2
+# tow to Hangar 7 across runway 15/33
+P 47.79260200 12.99802200 101.6
+W 47.79302000 12.99900000
+H 47.79330000 13.00120000 hold short of runway 15/33
+W 47.79380000 13.00450000
+P 47.79398700 13.00676300 340.8
+```
+
+- `W lat lon` is a waypoint: the aircraft's reference point passes over it
+  facing the next position. The last line of a route, if it is a waypoint,
+  keeps the heading the aircraft arrives with. A taxi route's points convert
+  directly into `W` lines.
+- `H lat lon text` is a hold point: a waypoint where the tug will stop and
+  wait (version 10 below); the text says why ("hold short of runway 15/33").
+- `P` lines are as in version 1. Version 1 routes (`BPROUTE 1`, `P` lines
+  only) are read as before.
+- `bp/route_current` writes `BPROUTE 2` with its `H` lines when the route has
+  a hold point, else `BPROUTE 1` as before. Waypoints are written as `P` lines
+  with the heading they were given.
+
 ## Testing
 
 ### Unit tests
@@ -400,7 +429,8 @@ All run as part of `tests/run_all_tests.sh`:
   heartbeat stops.
 - `tests/run_ext_api_route_tests.sh` checks reading and writing route text:
   comments, line endings, every kind of bad input refused with a reason that
-  names the line, the position limit, and that a written route reads back;
+  names the line, the position limit (64), waypoints facing the next position,
+  hold points with their text, and that a written route reads back;
   and the rule for when a route may change (before an operation, while the
   tug waits for a plan, during the connected hold; never with the planner
   open, during a manual push or in slave mode).

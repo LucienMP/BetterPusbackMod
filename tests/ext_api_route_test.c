@@ -39,8 +39,10 @@ test_bad_routes_are_refused_with_a_reason(void)
 {
     assert(parse("") == -1 && strstr(reason, "BPROUTE") != NULL);
     assert(parse("P 47 12 180\n") == -1 && strstr(reason, "BPROUTE") != NULL);
-    assert(parse("BPROUTE 2\nP 47 12 180\n") == -1 &&
+    assert(parse("BPROUTE 3\nP 47 12 180\n") == -1 &&
         strstr(reason, "version") != NULL);
+    /* W and H lines only in version 2. */
+    assert(parse("BPROUTE 1\nW 47 12\n") == -1 && strstr(reason, "line 2"));
     assert(parse("BPROUTE 1\n") == -1 && strstr(reason, "no positions"));
     assert(parse("BPROUTE 1\nP 47 12\n") == -1 &&
         strstr(reason, "line 2") != NULL);
@@ -68,16 +70,72 @@ test_too_many_positions_are_refused(void)
 }
 
 static void
+test_version_2_waypoints_and_hold_points(void)
+{
+    int n = parse("BPROUTE 2\n"
+        "# tow to Hangar 7 across runway 15/33\n"
+        "P 47.79260200 12.99802200 101.6\n"
+        "W 47.79302000 12.99900000\n"
+        "H 47.79330000 13.00120000   hold short of runway 15/33  \n"
+        "W 47.79380000 13.00450000\n"
+        "P 47.79398700 13.00676300 340.8\n");
+
+    assert(n == 5);
+    assert(poses[0].kind == BP_EXT_POSE_POSITION && poses[0].hdg == 101.6);
+    assert(poses[1].kind == BP_EXT_POSE_WAYPOINT);
+    assert(poses[2].kind == BP_EXT_POSE_HOLD);
+    assert(strcmp(poses[2].hold_text, "hold short of runway 15/33") == 0);
+    /* A waypoint faces the next position: here roughly east-north-east. */
+    assert(fabs(poses[1].hdg - bp_ext_route_bearing(poses[1].lat,
+        poses[1].lon, poses[2].lat, poses[2].lon)) < 1e-9);
+    assert(poses[1].hdg > 60 && poses[1].hdg < 80);
+    assert(poses[4].hdg == 340.8);
+    /* The last waypoint keeps the heading it arrives with. */
+    assert(parse("BPROUTE 2\nP 47 12 90\nW 47 12.001\n") == 2 &&
+        fabs(poses[1].hdg - 90) < 0.01);
+    assert(parse("BPROUTE 2\nW 47 12\n") == -1 && strstr(reason, "one waypoint"));
+    assert(parse("BPROUTE 2\nH 47 12\n") == -1 && strstr(reason, "holds"));
+    assert(parse("BPROUTE 2\nW 47 12 90\n") == -1 && strstr(reason, "W <"));
+    assert(fabs(bp_ext_route_bearing(47, 12, 47.001, 12) - 0) < 1e-9);
+    assert(fabs(bp_ext_route_bearing(47, 12, 47, 12.001) - 90) < 1e-9);
+    assert(fabs(bp_ext_route_bearing(47, 12, 46.999, 12) - 180) < 1e-9);
+    assert(fabs(bp_ext_route_bearing(47, 12, 47, 11.999) - 270) < 1e-9);
+}
+
+static void
+test_sixty_four_positions_fit(void)
+{
+    char text[BP_EXT_ROUTE_TEXT_LEN];
+    size_t used = (size_t)snprintf(text, sizeof (text), "BPROUTE 2\n");
+
+    for (int i = 0; i < BP_EXT_ROUTE_MAX_POSES; i++)
+        used += (size_t)snprintf(text + used, sizeof (text) - used,
+            "W 47.%04d 12\n", i);
+    assert(BP_EXT_ROUTE_MAX_POSES == 64);
+    assert(parse(text) == 64);
+    /* Written back, 64 positions with hold texts fit the published text. */
+    for (int i = 0; i < 64; i++) {
+        poses[i].kind = BP_EXT_POSE_HOLD;
+        (void)snprintf(poses[i].hold_text, sizeof (poses[i].hold_text),
+            "hold short of taxiway %d", i);
+    }
+    assert(bp_ext_route_format(poses, 64, text, sizeof (text)));
+    assert(strncmp(text, "BPROUTE 2\n", 10) == 0);
+}
+
+static void
 test_a_written_route_reads_back(void)
 {
-    bp_ext_pose_t out[2] = {
-        { 47.79312345, 12.99751234, 180.0, true },
-        { 47.79240001, 12.99690002, 270.25, false }
+    bp_ext_pose_t out[3] = {
+        { 47.79312345, 12.99751234, 180.0, true, BP_EXT_POSE_POSITION, "" },
+        { 47.79240001, 12.99690002, 270.25, false, BP_EXT_POSE_POSITION, "" },
+        { 47.79200000, 12.99600000, 270.0, false, BP_EXT_POSE_HOLD,
+          "hold short of B" }
     };
     char text[BP_EXT_ROUTE_TEXT_LEN];
 
     assert(bp_ext_route_format(out, 2, text, sizeof (text)));
-    assert(strncmp(text, "BPROUTE 1\n", 10) == 0);
+    assert(strncmp(text, "BPROUTE 1\n", 10) == 0);   /* no hold: version 1 */
     assert(strstr(text, " push\n") != NULL && strstr(text, " tow\n") != NULL);
     assert(parse(text) == 2);
     assert(fabs(poses[0].lat - out[0].lat) < 1e-8);
@@ -85,6 +143,11 @@ test_a_written_route_reads_back(void)
     assert(fabs(poses[1].hdg - out[1].hdg) < 1e-2);
     /* A buffer too small is refused, never cut short. */
     assert(!bp_ext_route_format(out, 2, text, 30));
+    /* With a hold point: version 2, the H line with its text. */
+    assert(bp_ext_route_format(out, 3, text, sizeof (text)));
+    assert(strncmp(text, "BPROUTE 2\n", 10) == 0);
+    assert(strstr(text, "H 47.79200000 12.99600000 hold short of B\n") != NULL);
+    assert(parse(text) == 3 && poses[2].kind == BP_EXT_POSE_HOLD);
 }
 
 static bp_ext_route_gate_t
@@ -144,6 +207,8 @@ main(void)
     test_a_route_is_read();
     test_bad_routes_are_refused_with_a_reason();
     test_too_many_positions_are_refused();
+    test_version_2_waypoints_and_hold_points();
+    test_sixty_four_positions_fit();
     test_a_written_route_reads_back();
     test_a_route_may_change_only_when_safe();
     test_the_pilot_and_the_aircraft_come_first();
