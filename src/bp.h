@@ -303,6 +303,8 @@ void bp_route_set_source(bp_route_source_t source);
  */
 int bp_scenery_route_count(void);
 bool_t bp_route_load_scenery(int index, char *reason, size_t reason_len);
+/* Version 20: the area the operation will sweep, as text (ext_api_area.h). */
+size_t bp_area_text(char *text, size_t len);
 bp_route_source_t bp_route_source(void);
 
 bool_t acf_is_airliner(void);

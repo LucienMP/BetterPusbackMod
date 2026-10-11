@@ -63,6 +63,7 @@
 #include "tow_session.h"
 #include "ext_api_handoff.h"
 #include "ext_api_answer.h"
+#include "ext_api_area.h"
 #include "ext_api_tugpath.h"
 #include "ext_api_surface.h"
 #include "ext_api_tug.h"
@@ -5552,6 +5553,116 @@ bp_route_export(bp_ext_pose_t *poses, int max)
         n++;
     }
     return (n);
+}
+
+/* Local metres to "lat lon" for the area's text. */
+static int
+area_geo(char *text, size_t len, vect2_t pos)
+{
+    double lat, lon, alt;
+
+    /* X-Plane's Z axis is flipped to ours */
+    XPLMLocalToWorld(pos.x, dr_getf(&drs.local_y), -pos.y, &lat, &lon, &alt);
+    return (snprintf(text, len, "%.7f %.7f", lat, lon));
+}
+
+/*
+ * Version 20: the area the operation will sweep (ext_api_area.h), as text:
+ * the aircraft's footprint along the route still to drive, and the tug's road
+ * in (version 14) while the tug has yet to arrive. Returns the length.
+ */
+size_t
+bp_area_text(char *text, size_t len)
+{
+    enum { MAX_SEGS = 256, MAX_POSES = 100, LINE_ROOM = 96 };
+    bp_area_seg_t *segs;
+    size_t w;
+    int n = 0;
+
+#define AREA_ROOM()     (w + LINE_ROOM < len)
+#define AREA_PUT(...)   do {         if (w < len)             w += (size_t)snprintf(text + w, len - w, __VA_ARGS__);     } while (0)
+    if (len < 2 * LINE_ROOM)
+        return (0);
+    w = 0;
+    AREA_PUT("BPAREA %d\n", BP_EXT_AREA_FORMAT);
+    if (!inited)
+        return (w);
+
+    segs = safe_calloc(MAX_SEGS, sizeof (*segs));
+    for (const seg_t *seg = list_head(&bp.segs); seg != NULL &&
+        n < MAX_SEGS; seg = list_next(&bp.segs, seg)) {
+        bool_t turn = (seg->type == SEG_TYPE_TURN);
+
+        segs[n].turn = turn;
+        segs[n].x0 = seg->start_pos.x;
+        segs[n].y0 = seg->start_pos.y;
+        segs[n].hdg0 = seg->start_hdg;
+        segs[n].x1 = seg->end_pos.x;
+        segs[n].y1 = seg->end_pos.y;
+        segs[n].hdg1 = seg->end_hdg;
+        segs[n].r = turn ? seg->turn.r : 0;
+        segs[n].right = turn && seg->turn.right;
+        n++;
+    }
+    if (n > 0) {
+        bp_area_pose_t *poses = safe_calloc(MAX_POSES, sizeof (*poses));
+        double half = (bp_ls.outline != NULL ? bp_ls.outline->semispan :
+            20.0) + BP_EXT_AREA_MARGIN_M;
+        double each_way = (bp_ls.outline != NULL ?
+            bp_ls.outline->length / 2 : 25.0) + BP_EXT_AREA_MARGIN_M;
+        double step = MAX(BP_EXT_AREA_STEP_M,
+            bp_area_length(segs, n) / (MAX_POSES - 1));
+        int np = bp_area_sample(segs, n, step, poses, MAX_POSES);
+
+        AREA_PUT("# the aircraft along its route: F lat lon heading "
+            "ahead_m behind_m half_width_m\n");
+        for (int i = 0; i < np && AREA_ROOM(); i++) {
+            AREA_PUT("F ");
+            if (w < len) {
+                w += (size_t)area_geo(text + w, len - w,
+                    VECT2(poses[i].x, poses[i].y));
+            }
+            AREA_PUT(" %.1f %.1f %.1f %.1f\n", poses[i].hdg, each_way,
+                each_way, half);
+        }
+        free(poses);
+    }
+    free(segs);
+
+    /* The tug's road in, until it reaches the aircraft. */
+    if (!slave_mode && (!bp_started || (tug_path_active &&
+        bp.step <= PB_STEP_DRIVING_UP_CLOSE))) {
+        bp_ext_tugpath_t path;
+        char reason[BP_EXT_TUGPATH_REASON_LEN];
+        double lat, lon, alt;
+        vect2_t pos = VECT2(dr_getf(&drs.local_x), -dr_getf(&drs.local_z));
+        vect2_t nose = vect2_add(pos, vect2_scmul(hdg2dir(dr_getf(&drs.hdg)),
+            -bp.acf.nw_z));
+        bp_ext_geo_t acf;
+
+        XPLMLocalToWorld(pos.x, dr_getf(&drs.local_y), -pos.y, &lat, &lon,
+            &alt);
+        acf.lat = lat;
+        acf.lon = lon;
+        if (bp_ext_tugpath_parse(ext_tug_path_text(), &path, reason,
+            sizeof (reason)) && bp_ext_tugpath_usable(&path, acf, reason,
+            sizeof (reason)) && AREA_ROOM()) {
+            AREA_PUT("# the tug's road in: T half_width_m, then P lat lon\n");
+            AREA_PUT("T 3.0\n");
+            AREA_PUT("P %.7f %.7f\n", path.origin.lat, path.origin.lon);
+            for (int i = 0; i < path.n && AREA_ROOM(); i++)
+                AREA_PUT("P %.7f %.7f\n", path.way[i].lat, path.way[i].lon);
+            if (AREA_ROOM()) {
+                AREA_PUT("P ");
+                if (w < len)
+                    w += (size_t)area_geo(text + w, len - w, nose);
+                AREA_PUT("\n");
+            }
+        }
+    }
+#undef AREA_ROOM
+#undef AREA_PUT
+    return (w < len ? w : len - 1);
 }
 
 bool_t

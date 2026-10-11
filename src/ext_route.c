@@ -21,6 +21,8 @@
 #include "bp_cam.h"
 #include "ext_api.h"
 #include "ext_api_answer.h"
+#include "ext_api_area.h"
+#include "ext_tug.h"
 #include "ext_api_route.h"
 #include "tow_session.h"
 #include "xplane.h"
@@ -54,6 +56,12 @@ static dr_t route_seq_dr, route_status_dr;
 static dr_t route_source_dr, route_source_name_dr;
 static XPLMCommandRef load_cmd = NULL, check_cmd = NULL, clear_cmd = NULL;
 static XPLMCommandRef preposition_cmd = NULL;
+/* Version 20: the area the operation will sweep. */
+static char area[BP_EXT_AREA_TEXT_LEN] = "";
+static int area_seq = 0, area_ticks = 0;
+static uint64_t area_key = 0;
+static dr_t area_dr, area_seq_dr;
+#define AREA_REFRESH_TICKS 50       /* about every five seconds regardless */
 /* Version 15: the scenery's WED routes at the stand. */
 static int scenery_index = 1, scenery_count = -1;
 static dr_t scenery_index_dr, scenery_count_dr;
@@ -357,6 +365,37 @@ slot_cb(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
     return (1);
 }
 
+/* FNV-1a over a text, to notice another plugin's changes. */
+static uint64_t
+text_hash(const char *text, uint64_t h)
+{
+    for (const unsigned char *p = (const unsigned char *)text; *p != 0; p++)
+        h = (h ^ *p) * 1099511628211ULL;
+    return (h);
+}
+
+/*
+ * The area is rebuilt when the route or the tug's road changes, and every
+ * few seconds; bp/area_seq moves only when the text does.
+ */
+static void
+refresh_area(void)
+{
+    char text[BP_EXT_AREA_TEXT_LEN];
+    uint64_t key = text_hash(ext_tug_path_text(), bp_route_signature()) ^
+        (uint64_t)bp_current_step();
+
+    if (key == area_key && ++area_ticks < AREA_REFRESH_TICKS)
+        return;
+    area_key = key;
+    area_ticks = 0;
+    (void)bp_area_text(text, sizeof (text));
+    if (strcmp(text, area) != 0) {
+        (void)snprintf(area, sizeof (area), "%s", text);
+        area_seq++;
+    }
+}
+
 void
 ext_route_refresh(void)
 {
@@ -392,6 +431,8 @@ ext_route_refresh(void)
         hold != 0);
     (void)snprintf(tow_state_name_buf, sizeof (tow_state_name_buf), "%s",
         tow_state_name(tow_state));
+
+    refresh_area();
 
     route_source = (int)bp_route_source();
     (void)snprintf(route_source_name, sizeof (route_source_name), "%s",
@@ -488,6 +529,12 @@ ext_route_init(void)
     emergency_stop_cmd = XPLMCreateCommand("BetterPushback/emergency_stop",
         _("Stop the push or tow at once, the tug kept connected"));
     XPLMRegisterCommandHandler(emergency_stop_cmd, emergency_stop_cb, 1, NULL);
+    area[0] = '\0';
+    area_seq = 0;
+    area_key = 0;
+    area_ticks = AREA_REFRESH_TICKS;
+    dr_create_b(&area_dr, area, sizeof (area), B_FALSE, "bp/area");
+    dr_create_i(&area_seq_dr, &area_seq, B_FALSE, "bp/area_seq");
     scenery_index = 1;
     scenery_count = -1;
     dr_create_i(&scenery_index_dr, &scenery_index, B_TRUE,
@@ -519,6 +566,8 @@ ext_route_fini(void)
     XPLMUnregisterCommandHandler(preposition_cmd, preposition_cb, 1, NULL);
     XPLMUnregisterCommandHandler(load_scenery_cmd, load_scenery_cb, 1, NULL);
     dr_delete(&scenery_index_dr);
+    dr_delete(&area_dr);
+    dr_delete(&area_seq_dr);
     dr_delete(&scenery_count_dr);
     dr_delete(&hold_dr);
     dr_delete(&hold_reason_dr);

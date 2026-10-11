@@ -33,7 +33,7 @@ a pilot who uses it on its own.
 
 | Dataref | Type | Meaning |
 | --- | --- | --- |
-| `bp/api_version` | int | Interface version (this document: 19) |
+| `bp/api_version` | int | Interface version (this document: 20) |
 | `bp/state_seq` | int | Changes whenever a value below changes |
 | `bp/started` | int | An operation is running (existing dataref) |
 | `bp/emergency_tow` | int | The running operation is the Emergency Tow |
@@ -749,6 +749,43 @@ if (XPLMGetDatai(answer_seq_dr) != before &&
     XPLMGetDatab(answer_reason_dr, reason, 0, sizeof (reason) - 1);
 ```
 
+## Version 20: the area the operation will sweep
+
+So that a ground-handling plugin can move its vehicles and people out of the
+way, and an ATC plugin can keep its traffic clear.
+
+| Dataref | Type | Meaning |
+| --- | --- | --- |
+| `bp/area` | byte[8192] | The area, in the text form below |
+| `bp/area_seq` | int | Goes up by one whenever the area changes |
+
+```
+BPAREA 1
+# the aircraft along its route: F lat lon heading ahead_m behind_m half_width_m
+F 47.2598100 11.3456700 270.0 22.9 22.9 19.8
+F 47.2598100 11.3463300 270.0 22.9 22.9 19.8
+...
+# the tug's road in: T half_width_m, then P lat lon
+T 3.0
+P 47.2601000 11.3461200
+P 47.2604400 11.3465000
+P 47.2598500 11.3450100
+```
+
+- `F` lines: the aircraft's footprint at points along the route still to be
+  driven, no more than 5 m apart (farther on long routes, up to 100 points),
+  turns followed along their arc. Each is a rectangle around the point:
+  `ahead_m` along the heading, `behind_m` back from it, `half_width_m` to
+  each side: half the aircraft's length and half its wingspan, 2 m added
+  all round. The swept area is all of them together. They follow the route
+  as it is driven: points already passed drop off.
+- `T` and `P` lines: the tug's road in from its parking place (version 14),
+  as a line `half_width_m` wide each side, ending at the aircraft's nose;
+  shown before the tug is called and until it arrives. Without a road the
+  tug's usual short approach in front of the nose is not listed.
+- Without a route and a road the text is only the `BPAREA 1` line.
+- Obstacles from other plugins checked by `check_route` are a later step.
+
 ## Testing
 
 ### Unit tests
@@ -776,6 +813,10 @@ All run as part of `tests/run_all_tests.sh`:
   default, that an external blocker holds the connection and the start with
   the other plugin's words (a text it did not terminate is cut), and that
   chocks and walkers left to the other plugin behave as described.
+- `tests/run_ext_api_area_tests.sh` checks that straight legs are sampled
+  every few metres, that turns follow their arc to either side (whichever
+  side reaches the segment's end), that legs join, and that a cut-short list
+  keeps the route's end.
 - `tests/run_ext_api_answer_tests.sh` checks that every answer moves the
   sequence, accepted answers carry no reason, long words are cut, and a
   command run inside another does not answer for it.
