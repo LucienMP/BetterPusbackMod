@@ -33,7 +33,7 @@ a pilot who uses it on its own.
 
 | Dataref | Type | Meaning |
 | --- | --- | --- |
-| `bp/api_version` | int | Interface version (this document: 16) |
+| `bp/api_version` | int | Interface version (this document: 17) |
 | `bp/state_seq` | int | Changes whenever a value below changes |
 | `bp/started` | int | An operation is running (existing dataref) |
 | `bp/emergency_tow` | int | The running operation is the Emergency Tow |
@@ -656,6 +656,30 @@ Already possible, and so described here rather than changed:
   last position is ahead of the one before it, from `load_route` or the
   planner.
 
+## Version 17: winter and night
+
+Pushes on a wet, snowy or icy apron are slower and gentler, and the tug's
+lights are on at night and in low visibility.
+
+| Dataref | Type | Written by | Meaning |
+| --- | --- | --- | --- |
+| `bp/surface` | int | BetterPushback | The apron now: 0 dry, 1 wet, 2 standing water, 3 snow, 4 ice, 5 snow on ice |
+| `bp/surface_name` | byte[16] | BetterPushback | `dry`, `wet`, `standing_water`, `snow`, `ice`, `snow_on_ice` |
+| `bp/surface_factor` | float | BetterPushback | What the push's top speeds are multiplied by on it (1 dry, 0.9 wet, 0.8 standing water, 0.6 snow, 0.4 ice) |
+| `bp/surface_override` | int, writable | the other plugin | 0-5: the apron as that plugin knows it (cleared, de-iced, sanded); -1 (the default): X-Plane's runway condition |
+| `bp/tug_lights` | int | BetterPushback | 1 when the tug's lights are on: the sun less than 5 degrees above the horizon, or visibility under 1500 m |
+
+- The surface is X-Plane's runway condition
+  (`sim/weather/region/runway_friction`) unless overridden. It is taken as
+  the tug is called and kept for the operation.
+- On it, the push's top speeds forward and back, and its acceleration and
+  braking (1 dry, 0.8 wet, 0.7 standing water, 0.5 snow, 0.35 ice), are
+  lowered; a tow speed limit (version 9) applies on top. The estimates
+  (version 12) use the lowered speeds.
+- The tug's lights (`bp/anim/vehicle_lights` and the cradle lights) came on
+  only at dusk; now also in fog. Walkers with lit wands are the other
+  plugin's (version 13).
+
 ## Testing
 
 ### Unit tests
@@ -683,6 +707,10 @@ All run as part of `tests/run_all_tests.sh`:
   default, that an external blocker holds the connection and the start with
   the other plugin's words (a text it did not terminate is cut), and that
   chocks and walkers left to the other plugin behave as described.
+- `tests/run_ext_api_surface_tests.sh` checks X-Plane's runway condition is
+  read into the surfaces, that another plugin's override wins, that every
+  slippery surface is slower and gentler than the one before, and when the
+  lights are on.
 - `tests/run_ext_api_handoff_tests.sh` also checks that the tug held
   connected after the push says why, in the other plugin's words or plainly,
   and blocks nothing before; `tests/run_tow_session_tests.sh` that a tow-in

@@ -18,6 +18,8 @@ void ext_tug_fini(void);
 bool_t ext_tug_refresh(void);
 /* Version 14: the text another plugin wrote into bp/tug_path_in. */
 const char *ext_tug_path_text(void);
+/* Version 17: the apron's surface now (ext_api_surface.h's numbers). */
+int ext_tug_surface(void);
 
 #ifdef __cplusplus
 }

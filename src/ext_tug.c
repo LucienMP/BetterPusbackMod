@@ -16,6 +16,7 @@
 #include "bp.h"
 #include "ext_api_tug.h"
 #include "ext_api_tugpath.h"
+#include "ext_api_surface.h"
 #include "ext_tug.h"
 
 /* Before the tug is called: the drive-up the tug makes today, and connecting. */
@@ -41,6 +42,14 @@ static char tug_path_reason[BP_EXT_TUGPATH_REASON_LEN] = "";
 static int prepositioned = 0;
 static dr_t tug_path_in_dr, tug_path_status_dr, tug_path_reason_dr,
     prepositioned_dr;
+/* Version 17: winter and night. */
+static int surface_override = -1, surface = BP_SURFACE_DRY, tug_lights = 0;
+static char surface_name[16] = "dry";
+static float surface_factor = 1.0f;
+static dr_t friction_dr, sun_pitch_dr, visibility_dr;
+static bool_t have_visibility = B_FALSE;
+static dr_t surface_override_dr, surface_dr, surface_name_dr,
+    surface_factor_dr, tug_lights_dr;
 /* An estimate for the drive in along a road, before the tug is chosen. */
 #define ROAD_SPEED_MPS 6.0
 
@@ -58,6 +67,14 @@ refresh_route_time(void)
     bp_route_speeds(&fwd, &rev, &accel);
     route_time = n > 0 ? (float)bp_ext_route_time(legs, n, fwd, rev, accel,
         REVERSE_PAUSE_S) : -1.0f;
+}
+
+int
+ext_tug_surface(void)
+{
+    if (!inited)
+        return (BP_SURFACE_DRY);
+    return (bp_surface_choose(surface_override, dr_getf(&friction_dr)));
 }
 
 const char *
@@ -117,6 +134,14 @@ ext_tug_refresh(void)
     (void)snprintf(tug_origin, sizeof (tug_origin), "%s",
         bp_tug_origin_name());
 
+    /* Version 17: the apron and the light. */
+    surface = ext_tug_surface();
+    (void)snprintf(surface_name, sizeof (surface_name), "%s",
+        bp_surface_name(surface));
+    surface_factor = (float)bp_surface_speed_factor(surface);
+    tug_lights = bp_surface_lights_needed(dr_getf(&sun_pitch_dr),
+        have_visibility ? dr_getf(&visibility_dr) * 1609.344 : -1) ? 1 : 0;
+
     tug_state = state;
     (void)snprintf(tug_state_name, sizeof (tug_state_name), "%s",
         bp_ext_tug_state_name(state));
@@ -164,6 +189,18 @@ ext_tug_init(void)
     bp_ext_milestones_reset(&milestones);
     fdr_find(&zulu_dr, "sim/time/zulu_time_sec");
     fdr_find(&lat_dr, "sim/flightmodel/position/latitude");
+    fdr_find(&friction_dr, "sim/weather/region/runway_friction");
+    fdr_find(&sun_pitch_dr, "sim/graphics/scenery/sun_pitch_degrees");
+    have_visibility = dr_find(&visibility_dr,
+        "sim/weather/aircraft/visibility_reported_sm");
+    dr_create_i(&surface_override_dr, &surface_override, B_TRUE,
+        "bp/surface_override");
+    dr_create_i(&surface_dr, &surface, B_FALSE, "bp/surface");
+    dr_create_b(&surface_name_dr, surface_name, sizeof (surface_name),
+        B_FALSE, "bp/surface_name");
+    dr_create_f(&surface_factor_dr, &surface_factor, B_FALSE,
+        "bp/surface_factor");
+    dr_create_i(&tug_lights_dr, &tug_lights, B_FALSE, "bp/tug_lights");
     fdr_find(&lon_dr, "sim/flightmodel/position/longitude");
     dr_create_b(&tug_path_in_dr, tug_path_in, sizeof (tug_path_in), B_TRUE,
         "bp/tug_path_in");
@@ -216,5 +253,10 @@ ext_tug_fini(void)
     dr_delete(&tug_path_status_dr);
     dr_delete(&tug_path_reason_dr);
     dr_delete(&prepositioned_dr);
+    dr_delete(&surface_override_dr);
+    dr_delete(&surface_dr);
+    dr_delete(&surface_name_dr);
+    dr_delete(&surface_factor_dr);
+    dr_delete(&tug_lights_dr);
     inited = B_FALSE;
 }

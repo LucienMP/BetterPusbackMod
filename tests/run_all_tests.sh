@@ -10,6 +10,7 @@ for runner in \
     run_ext_api_msgs_tests.sh \
     run_ext_api_route_tests.sh \
     run_ext_api_state_tests.sh \
+    run_ext_api_surface_tests.sh \
     run_ext_api_tug_tests.sh \
     run_ext_api_tugpath_tests.sh \
     run_ext_api_voice_tests.sh \

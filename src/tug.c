@@ -38,6 +38,7 @@
 
 #include "cfg.h"
 #include "driving.h"
+#include "ext_api_surface.h"
 #include "msg.h"
 #include "tug.h"
 #include "xplane.h"
@@ -213,6 +214,19 @@ static const char *tug_dr_list[TUG_NUM_ANIMS + 1] = {
 
 static bool_t cradle_lights_req = B_FALSE;
 static dr_t sun_pitch_dr;
+/* Version 17: lights in low visibility as well as at night. */
+static dr_t visibility_dr;
+static bool_t have_visibility = B_FALSE;
+
+/* The tug's lights are on: at night, at dusk and dawn, or in low visibility. */
+static bool_t
+lights_needed(void)
+{
+    double visibility_m = have_visibility ?
+        dr_getf(&visibility_dr) * 1609.344 : -1;
+
+    return (bp_surface_lights_needed(dr_getf(&sun_pitch_dr), visibility_m));
+}
 static bool_t inited = B_FALSE;
 static tug_t *glob_tug = NULL;
 static XPLMCommandRef tug_reload_cmd = NULL;
@@ -1015,6 +1029,8 @@ tug_glob_init(void) {
     }
 
     fdr_find(&sun_pitch_dr, "sim/graphics/scenery/sun_pitch_degrees");
+    have_visibility = dr_find(&visibility_dr,
+        "sim/weather/aircraft/visibility_reported_sm");
 
     tug_reload_cmd = XPLMCreateCommand("BetterPushback/reload_tug",
                                        "Reload tug model");
@@ -1547,8 +1563,7 @@ tug_anim(tug_t *tug, double d_t, double cur_t) {
         anim[ANIM_FRONT_STEER].value = (tug->cur_steer /
                                         (2 * tug->veh.max_steer)) + 0.5;
 
-        anim[ANIM_VEHICLE_LIGHTS].value =
-                (dr_getf(&sun_pitch_dr) < LIGHTS_ON_SUN_ANGLE);
+        anim[ANIM_VEHICLE_LIGHTS].value = lights_needed();
         if (tug->pos.spd < -0.1) {
             anim[ANIM_REVERSE_LIGHTS].value = B_TRUE;
             anim[ANIM_DRIVER_ORIENTATION].value = MIN(1,
@@ -1567,7 +1582,7 @@ tug_anim(tug_t *tug, double d_t, double cur_t) {
                                                 d_t / CAB_LIFT_TIME);
         }
         anim[ANIM_CRADLE_LIGHTS].value = (cradle_lights_req &&
-                                          dr_getf(&sun_pitch_dr) < LIGHTS_ON_SUN_ANGLE);
+                                          lights_needed());
     } else {
         float value;
         int64_t mt = microclock();

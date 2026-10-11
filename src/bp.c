@@ -63,6 +63,7 @@
 #include "tow_session.h"
 #include "ext_api_handoff.h"
 #include "ext_api_tugpath.h"
+#include "ext_api_surface.h"
 #include "ext_tug.h"
 #include "scenery_route.h"
 #include "wed2route.h"
@@ -3129,6 +3130,25 @@ pb_step_tug_load(void) {
         bp_ls.tug->info->max_tow_fwd_speed);
     bp.veh.max_rev_spd = MIN(bp.veh.max_rev_spd,
         bp_ls.tug->info->max_tow_rev_speed);
+    /*
+     * Winter (version 17): slower and gentler on a slippery apron, the
+     * surface taken as the tug is called. bp_state_init restores the limits
+     * after each operation.
+     */
+    {
+        int surface = ext_tug_surface();
+        double speed = bp_surface_speed_factor(surface);
+        double accel = bp_surface_accel_factor(surface);
+
+        bp.veh.max_fwd_spd *= speed;
+        bp.veh.max_rev_spd *= speed;
+        bp.veh.max_accel *= accel;
+        bp.veh.max_decel *= accel;
+        if (surface != BP_SURFACE_DRY) {
+            logMsg(BP_INFO_LOG "Apron %s: push speeds x%.2f, acceleration "
+                "x%.2f", bp_surface_name(surface), speed, accel);
+        }
+    }
     /* The tug's own speeds, before another plugin's tow speed limit. */
     tug_max_fwd_spd = bp.veh.max_fwd_spd;
     tug_max_rev_spd = bp.veh.max_rev_spd;
