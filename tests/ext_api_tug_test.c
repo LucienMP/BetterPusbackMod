@@ -71,9 +71,31 @@ test_the_milestones_are_set_once(void)
     assert(m.off_blocks == 120);
 }
 
+static void
+test_a_busy_hub_makes_the_tug_wait(void)
+{
+    char text[96];
+
+    assert(bp_ext_tug_wait_remaining(0, 10) == 0);
+    assert(bp_ext_tug_wait_remaining(-5, 0) == 0);
+    assert(bp_ext_tug_wait_remaining(360, 0) == 360);
+    assert(bp_ext_tug_wait_remaining(360, 60) == 300);
+    assert(bp_ext_tug_wait_remaining(360, 400) == 0);
+    assert(bp_ext_tug_wait_remaining(360, -3) == 360);
+    bp_ext_tug_wait_text(300, text, sizeof (text));
+    assert(strcmp(text, "All tugs are busy: the tug comes in about 5 "
+        "minutes") == 0);
+    bp_ext_tug_wait_text(301, text, sizeof (text));
+    assert(strstr(text, "about 6 minutes") != NULL);
+    bp_ext_tug_wait_text(10, text, sizeof (text));
+    assert(strstr(text, "about 1 minute") != NULL &&
+        strstr(text, "minutes") == NULL);
+}
+
 int
 main(void)
 {
+    test_a_busy_hub_makes_the_tug_wait();
     test_the_tug_state_follows_every_step();
     test_the_route_time();
     test_the_milestones_are_set_once();

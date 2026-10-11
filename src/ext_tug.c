@@ -50,6 +50,14 @@ static dr_t friction_dr, sun_pitch_dr, visibility_dr;
 static bool_t have_visibility = B_FALSE;
 static dr_t surface_override_dr, surface_dr, surface_name_dr,
     surface_factor_dr, tug_lights_dr;
+/* Version 18: availability, and the wait at a busy hub. */
+static float tug_wait = 0, tug_wait_remaining = 0;
+static int tug_available_now = -1, available_ticks = 0;
+static char tug_available_reason[128] = "";
+static dr_t tug_wait_dr, tug_wait_remaining_dr, tug_available_dr,
+    tug_available_reason_dr;
+#define AVAILABLE_REFRESH_TICKS 300   /* about half a minute */
+#define AVAILABLE_RETRY_TICKS 50      /* until BetterPushback is initialised */
 /* An estimate for the drive in along a road, before the tug is chosen. */
 #define ROAD_SPEED_MPS 6.0
 
@@ -67,6 +75,12 @@ refresh_route_time(void)
     bp_route_speeds(&fwd, &rev, &accel);
     route_time = n > 0 ? (float)bp_ext_route_time(legs, n, fwd, rev, accel,
         REVERSE_PAUSE_S) : -1.0f;
+}
+
+double
+ext_tug_wait_s(void)
+{
+    return (tug_wait);
 }
 
 int
@@ -142,6 +156,25 @@ ext_tug_refresh(void)
     tug_lights = bp_surface_lights_needed(dr_getf(&sun_pitch_dr),
         have_visibility ? dr_getf(&visibility_dr) * 1609.344 : -1) ? 1 : 0;
 
+    /* Version 18: is there a tug for this aircraft, and is one free. */
+    if (state == BP_EXT_TUG_NONE) {
+        if (--available_ticks <= 0) {
+            int was = tug_available_now;
+
+            tug_available_now = bp_tug_available(tug_available_reason,
+                sizeof (tug_available_reason));
+            available_ticks = (tug_available_now < 0) ?
+                AVAILABLE_RETRY_TICKS : AVAILABLE_REFRESH_TICKS;
+            changed = changed || (was != tug_available_now);
+        }
+    } else {
+        available_ticks = 0;    /* asked again once the operation ends */
+    }
+    tug_wait_remaining = (float)bp_tug_wait_remaining();
+    if (tug_wait_remaining > 0)
+        state = BP_EXT_TUG_AT_PARKING;
+    changed = changed || (state != tug_state);
+
     tug_state = state;
     (void)snprintf(tug_state_name, sizeof (tug_state_name), "%s",
         bp_ext_tug_state_name(state));
@@ -160,7 +193,10 @@ ext_tug_refresh(void)
 
     /* Before the tug is called, how long until it would be connected. */
     eta_if_called = (state == BP_EXT_TUG_NONE) ?
-        (float)(drive_up_time() + CONNECT_TIME_S) : -1.0f;
+        (float)(drive_up_time() + CONNECT_TIME_S + (tug_wait > 0 ?
+        tug_wait : 0)) : -1.0f;
+    if (tug_wait_remaining > 0)
+        tug_eta = (float)(tug_wait_remaining + drive_up_time());
     refresh_route_time();
 
     {
@@ -201,6 +237,13 @@ ext_tug_init(void)
     dr_create_f(&surface_factor_dr, &surface_factor, B_FALSE,
         "bp/surface_factor");
     dr_create_i(&tug_lights_dr, &tug_lights, B_FALSE, "bp/tug_lights");
+    dr_create_f(&tug_wait_dr, &tug_wait, B_TRUE, "bp/tug_wait_s");
+    dr_create_f(&tug_wait_remaining_dr, &tug_wait_remaining, B_FALSE,
+        "bp/tug_wait_remaining_s");
+    dr_create_i(&tug_available_dr, &tug_available_now, B_FALSE,
+        "bp/tug_available");
+    dr_create_b(&tug_available_reason_dr, tug_available_reason,
+        sizeof (tug_available_reason), B_FALSE, "bp/tug_available_reason");
     fdr_find(&lon_dr, "sim/flightmodel/position/longitude");
     dr_create_b(&tug_path_in_dr, tug_path_in, sizeof (tug_path_in), B_TRUE,
         "bp/tug_path_in");
@@ -258,5 +301,9 @@ ext_tug_fini(void)
     dr_delete(&surface_name_dr);
     dr_delete(&surface_factor_dr);
     dr_delete(&tug_lights_dr);
+    dr_delete(&tug_wait_dr);
+    dr_delete(&tug_wait_remaining_dr);
+    dr_delete(&tug_available_dr);
+    dr_delete(&tug_available_reason_dr);
     inited = B_FALSE;
 }

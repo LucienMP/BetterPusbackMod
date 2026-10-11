@@ -20,6 +20,8 @@ bool_t ext_tug_refresh(void);
 const char *ext_tug_path_text(void);
 /* Version 17: the apron's surface now (ext_api_surface.h's numbers). */
 int ext_tug_surface(void);
+/* Version 18: the wait another plugin set in bp/tug_wait_s (busy hub). */
+double ext_tug_wait_s(void);
 
 #ifdef __cplusplus
 }

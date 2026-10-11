@@ -265,6 +265,10 @@ void bp_route_speeds(double *fwd, double *rev, double *accel);
  * (bp/tug_path_in, ext_api_tugpath.h), and the prepositioned tug.
  */
 int bp_tug_path_status(void);           /* bp_ext_tugpath_status_t */
+/* Version 18: a tug suits this aircraft (1, 0 with the reason, -1 unknown),
+ * and the seconds it still waits for a free one at a busy hub. */
+int bp_tug_available(char *reason, size_t reason_len);
+double bp_tug_wait_remaining(void);
 const char *bp_tug_path_reason(void);
 const char *bp_tug_origin_name(void);   /* "" unless it came from a parking */
 bool_t bp_tug_at_parking(void);         /* waiting there, not yet driving */

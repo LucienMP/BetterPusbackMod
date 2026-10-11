@@ -33,7 +33,7 @@ a pilot who uses it on its own.
 
 | Dataref | Type | Meaning |
 | --- | --- | --- |
-| `bp/api_version` | int | Interface version (this document: 17) |
+| `bp/api_version` | int | Interface version (this document: 18) |
 | `bp/state_seq` | int | Changes whenever a value below changes |
 | `bp/started` | int | An operation is running (existing dataref) |
 | `bp/emergency_tow` | int | The running operation is the Emergency Tow |
@@ -680,6 +680,28 @@ lights are on at night and in low visibility.
   only at dusk; now also in fog. Walkers with lit wands are the other
   plugin's (version 13).
 
+## Version 18: availability
+
+Small fields have no tug for every aircraft, and big ones are busy.
+
+| Dataref | Type | Written by | Meaning |
+| --- | --- | --- | --- |
+| `bp/tug_available` | int | BetterPushback | 1 when a tug in BetterPushback's library suits this aircraft at this airport, 0 when none does, -1 until BetterPushback is initialised; refreshed about every half minute while no tug is called (the library is asked again only when the aircraft or the airport changes) |
+| `bp/tug_available_reason` | byte[128] | BetterPushback | Why not ("no tug in the library suits this aircraft (2 t); see Log.txt"); the log lists each tug and why it does not suit |
+| `bp/tug_wait_s` | float, writable | the other plugin | At a busy hub: seconds until a tug is free (0, the default: none). The tug is called as usual, but comes only after the wait |
+| `bp/tug_wait_remaining_s` | float | BetterPushback | Seconds still to wait; 0 when not waiting |
+
+- `call_tow` and `preposition` are refused at once, with the reason, when no
+  tug suits, instead of failing once the tug is called. The pilot's own
+  call speaks the failure as before.
+- While the tug waits, `bp/tug_state` is 1 (at its parking), `bp/tug_eta_s`
+  counts down the wait and the drive, and `bp/status_text` reads "All tugs
+  are busy: the tug comes in about 6 minutes". Lowering `bp/tug_wait_s`
+  shortens the wait at once; 0 ends it.
+- Before the tug is called, `bp/tug_eta_if_called_s` includes the wait.
+- Light aircraft moved by hand with a towbar need models the library does not
+  have yet; until then they get "no tug suits".
+
 ## Testing
 
 ### Unit tests
@@ -707,6 +729,8 @@ All run as part of `tests/run_all_tests.sh`:
   default, that an external blocker holds the connection and the start with
   the other plugin's words (a text it did not terminate is cut), and that
   chocks and walkers left to the other plugin behave as described.
+- `tests/run_ext_api_tug_tests.sh` also checks the wait at a busy hub and
+  its words.
 - `tests/run_ext_api_surface_tests.sh` checks X-Plane's runway condition is
   read into the surfaces, that another plugin's override wins, that every
   slippery surface is slower and gentler than the one before, and when the

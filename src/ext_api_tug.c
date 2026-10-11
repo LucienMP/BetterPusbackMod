@@ -1,4 +1,5 @@
 #include <math.h>
+#include <stdio.h>
 
 #include "ext_api_tug.h"
 #include "pushback_step.h"
@@ -129,4 +130,23 @@ bp_ext_milestones_update(bp_ext_milestones_t *m, int step,
         changed = true;
     }
     return (changed);
+}
+
+double
+bp_ext_tug_wait_remaining(double wait, double elapsed)
+{
+    if (!isfinite(wait) || wait <= 0 || !isfinite(elapsed))
+        return (0);
+    return (elapsed >= wait ? 0 : wait - (elapsed > 0 ? elapsed : 0));
+}
+
+void
+bp_ext_tug_wait_text(double remaining, char *text, size_t len)
+{
+    int minutes = (int)ceil(remaining / 60.0);
+
+    if (minutes < 1)
+        minutes = 1;
+    (void)snprintf(text, len, "All tugs are busy: the tug comes in about %d "
+        "minute%s", minutes, minutes == 1 ? "" : "s");
 }

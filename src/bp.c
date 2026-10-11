@@ -64,6 +64,7 @@
 #include "ext_api_handoff.h"
 #include "ext_api_tugpath.h"
 #include "ext_api_surface.h"
+#include "ext_api_tug.h"
 #include "ext_tug.h"
 #include "scenery_route.h"
 #include "wed2route.h"
@@ -3008,6 +3009,55 @@ tug_path_choose(void)
     }
 }
 
+/*
+ * Version 18: whether a tug in the library suits this aircraft, before one is
+ * called; the reason when not. -1 before BetterPushback is initialised.
+ */
+int
+bp_tug_available(char *reason, size_t reason_len)
+{
+    /* Asked of the library again only when the aircraft or the airport
+     * changes (tug_available logs each refusal). */
+    static char last_icao[8] = "", last_airline[1024] = "";
+    static double last_mtow = -1;
+    static int last = -1;
+    char icao[8] = {0};
+    char airline[1024] = {0};
+    double mtow;
+
+    if (reason_len > 0)
+        reason[0] = '\0';
+    if (!inited)
+        return (-1);
+    (void) find_nearest_airport(icao);
+    if (acf_is_airliner())
+        read_acf_airline(airline);
+    mtow = dr_getf(&drs.mtow);
+    if (last < 0 || mtow != last_mtow || strcmp(icao, last_icao) != 0 ||
+        strcmp(airline, last_airline) != 0) {
+        last = tug_available(mtow, dr_getf(&drs.leg_len), bp.acf.tirrad,
+            bp.acf.nw_type, icao[0] != '\0' ? icao : NULL, airline) ? 1 : 0;
+        last_mtow = mtow;
+        strlcpy(last_icao, icao, sizeof (last_icao));
+        strlcpy(last_airline, airline, sizeof (last_airline));
+    }
+    if (last == 0) {
+        (void)snprintf(reason, reason_len, "no tug in the library suits this "
+            "aircraft (%.0f t); see Log.txt", mtow / 1000.0);
+    }
+    return (last);
+}
+
+/* Seconds the tug still waits for a free one at a busy hub (version 18). */
+double
+bp_tug_wait_remaining(void)
+{
+    if (!bp_started || bp.step != PB_STEP_TUG_LOAD)
+        return (0);
+    return (bp_ext_tug_wait_remaining(ext_tug_wait_s(),
+        bp.cur_t - bp.step_start_t));
+}
+
 int
 bp_tug_path_status(void)
 {
@@ -4947,6 +4997,15 @@ bp_run(float elapsed, float elapsed2, int counter, void *refcon) {
             VERIFY_FAIL();
         case PB_STEP_TUG_LOAD:
             ASSERT3P(bp_ls.tug, ==, NULL);
+            /* At a busy hub the tug comes when one is free (version 18). */
+            if (bp_tug_wait_remaining() > 0) {
+                static char wait_text[96];
+
+                bp_ext_tug_wait_text(bp_tug_wait_remaining(), wait_text,
+                    sizeof (wait_text));
+                bp_hint_status_str = wait_text;
+                break;
+            }
             if (!pb_step_tug_load())
                 return (0);
             tug_pending_mode = (tug_auto_start && tug_starts_next_plane);

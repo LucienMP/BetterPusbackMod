@@ -16,6 +16,7 @@
 #define _EXT_API_TUG_H_
 
 #include <stdbool.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -54,6 +55,16 @@ double bp_ext_route_time(const bp_ext_leg_t *legs, int n, double fwd_spd,
 
 /* Seconds for the tug to cover `distance` at `speed` (at least walking pace). */
 double bp_ext_eta(double distance, double speed);
+
+/*
+ * Version 18: a wait another plugin sets at a busy hub ("all tugs busy, about
+ * six minutes"). Seconds still to wait `elapsed` seconds after the call; 0
+ * when there is none or it is over.
+ */
+double bp_ext_tug_wait_remaining(double wait, double elapsed);
+/* The status line meanwhile: "All tugs are busy: the tug comes in about 6
+ * minutes" (at least 1). */
+void bp_ext_tug_wait_text(double remaining, char *text, size_t len);
 
 /* Zulu seconds of an operation's milestones; -1 until each happens. */
 typedef struct {

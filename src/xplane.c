@@ -999,6 +999,8 @@ bp_tow_call(int kind, const bp_ext_pose_t *poses, int n, char *reason,
         (void)snprintf(reason, reason_len, "the preferences window is open");
         return (B_FALSE);
     }
+    if (bp_tug_available(reason, reason_len) == 0)
+        return (B_FALSE);
     if (kind == TOW_KIND_RECOVERY &&
         (refused = bp_recovery_refused()) != NULL) {
         (void)snprintf(reason, reason_len, "%s", refused);
@@ -1067,6 +1069,8 @@ bp_preposition_call(char *reason, size_t reason_len)
         (void)snprintf(reason, reason_len, "the preferences window is open");
         return (B_FALSE);
     }
+    if (bp_tug_available(reason, reason_len) == 0)
+        return (B_FALSE);
     bp_preposition_set(B_TRUE);
     if (connect_first_begin(B_FALSE) == 0 || !bp_started) {
         bp_preposition_set(B_FALSE);
