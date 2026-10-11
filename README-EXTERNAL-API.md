@@ -33,7 +33,7 @@ a pilot who uses it on its own.
 
 | Dataref | Type | Meaning |
 | --- | --- | --- |
-| `bp/api_version` | int | Interface version (this document: 18) |
+| `bp/api_version` | int | Interface version (this document: 19) |
 | `bp/state_seq` | int | Changes whenever a value below changes |
 | `bp/started` | int | An operation is running (existing dataref) |
 | `bp/emergency_tow` | int | The running operation is the Emergency Tow |
@@ -702,6 +702,53 @@ Small fields have no tug for every aircraft, and big ones are busy.
 - Light aircraft moved by hand with a towbar need models the library does not
   have yet; until then they get "no tug suits".
 
+## Version 19: every command answers
+
+One way of talking to every service: each command answers at once, accepted
+or refused with the reason, in the same four datarefs.
+
+| Dataref | Type | Meaning |
+| --- | --- | --- |
+| `bp/answer_seq` | int | Goes up by one with every answer |
+| `bp/answer_command` | byte[64] | The command answered, e.g. `BetterPushback/start` |
+| `bp/answer_status` | int | 1 accepted, 2 refused (0 before any) |
+| `bp/answer_reason` | byte[128] | Why it was refused ("the preferences window is open", "an operation is already under way"); empty when accepted |
+
+The commands that answer:
+
+- Every command of this interface: `load_route`, `check_route`,
+  `clear_route`, `save_route_slot`, `load_route_slot`, `call_tow`,
+  `continue_tow`, `emergency_stop`, `preposition`, `load_scenery_route`. They
+  also keep answering through `bp/route_seq`, `bp/route_status` and
+  `bp/route_reason`.
+- BetterPushback's own commands that run the operation: `start` (accepted
+  when the push starts, the planner opens for the plan, or a waiting tug is
+  sent), `stop`, `pause_resume`, `connect_first` (also when it calls in a
+  prepositioned tug), `call_emergency_tow`, `abort_push`, `disconnect`
+  (refused while another plugin holds the tug connected, version 16),
+  `reconnect` and `acknowledge_clear`.
+- A command that runs another (`start` runs `connect_first` when the tug is
+  always connected first) answers once, as itself.
+- Not the commands for the pilot's views and windows (the planner, the cab
+  camera, Ground Operations, the preferences, reload) nor the manual push's
+  steering.
+
+Already the case, and so only described here:
+
+- Every crew line carries a channel (`bp/msg_channel`, version 10): the tow
+  lines are said on Ground's frequency, the rest on the headset intercom.
+- In a shared cockpit, the commands that start or change an operation are
+  refused on the slave side with the reason; BetterPushback's own slave mode
+  is unchanged.
+
+```c
+int before = XPLMGetDatai(answer_seq_dr);
+XPLMCommandOnce(XPLMFindCommand("BetterPushback/start"));
+if (XPLMGetDatai(answer_seq_dr) != before &&
+    XPLMGetDatai(answer_status_dr) == 2)
+    XPLMGetDatab(answer_reason_dr, reason, 0, sizeof (reason) - 1);
+```
+
 ## Testing
 
 ### Unit tests
@@ -729,6 +776,9 @@ All run as part of `tests/run_all_tests.sh`:
   default, that an external blocker holds the connection and the start with
   the other plugin's words (a text it did not terminate is cut), and that
   chocks and walkers left to the other plugin behave as described.
+- `tests/run_ext_api_answer_tests.sh` checks that every answer moves the
+  sequence, accepted answers carry no reason, long words are cut, and a
+  command run inside another does not answer for it.
 - `tests/run_ext_api_tug_tests.sh` also checks the wait at a busy hub and
   its words.
 - `tests/run_ext_api_surface_tests.sh` checks X-Plane's runway condition is

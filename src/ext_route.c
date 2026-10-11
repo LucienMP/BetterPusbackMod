@@ -20,6 +20,7 @@
 #include "bp.h"
 #include "bp_cam.h"
 #include "ext_api.h"
+#include "ext_api_answer.h"
 #include "ext_api_route.h"
 #include "tow_session.h"
 #include "xplane.h"
@@ -81,9 +82,41 @@ static char hold_reason[BP_EXT_ROUTE_REASON_LEN];
 static dr_t hold_dr, hold_reason_dr;
 static XPLMCommandRef continue_tow_cmd = NULL, emergency_stop_cmd = NULL;
 
-static void
-answer(bool_t accepted, const char *reason)
+/* The command's name, for bp/answer_command (version 19). */
+static const char *
+command_name(XPLMCommandRef cmd)
 {
+    const struct {
+        XPLMCommandRef *ref;
+        const char *name;
+    } names[] = {
+        { &load_cmd, "BetterPushback/load_route" },
+        { &check_cmd, "BetterPushback/check_route" },
+        { &clear_cmd, "BetterPushback/clear_route" },
+        { &save_slot_cmd, "BetterPushback/save_route_slot" },
+        { &load_slot_cmd, "BetterPushback/load_route_slot" },
+        { &call_tow_cmd, "BetterPushback/call_tow" },
+        { &continue_tow_cmd, "BetterPushback/continue_tow" },
+        { &emergency_stop_cmd, "BetterPushback/emergency_stop" },
+        { &preposition_cmd, "BetterPushback/preposition" },
+        { &load_scenery_cmd, "BetterPushback/load_scenery_route" }
+    };
+
+    for (size_t i = 0; i < sizeof (names) / sizeof (names[0]); i++) {
+        if (cmd != NULL && *names[i].ref == cmd)
+            return (names[i].name);
+    }
+    return ("");
+}
+
+/*
+ * Answers a command: through bp/route_seq, route_status and route_reason
+ * (version 5) and through bp/answer_* (version 19).
+ */
+static void
+answer(XPLMCommandRef cmd, bool_t accepted, const char *reason)
+{
+    bp_ext_answer(command_name(cmd), accepted, reason);
     route_seq++;
     route_status = accepted ? ROUTE_STATUS_ACCEPTED : ROUTE_STATUS_REJECTED;
     (void)snprintf(route_reason, sizeof (route_reason), "%s",
@@ -108,21 +141,21 @@ load_route_cb(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
     n = bp_ext_route_parse(route_in, poses, BP_EXT_ROUTE_MAX_POSES, reason,
         sizeof (reason));
     if (n < 0) {
-        answer(B_FALSE, reason);
+        answer(cmd, B_FALSE, reason);
         return (1);
     }
     if (check_only) {
         bool_t fits = bp_route_check_external(poses, n, reason,
             sizeof (reason));
-        answer(fits, fits ? "" : reason);
+        answer(cmd, fits, fits ? "" : reason);
         return (1);
     }
     if (!bp_route_load_external(poses, n, reason, sizeof (reason))) {
-        answer(B_FALSE, reason);
+        answer(cmd, B_FALSE, reason);
         return (1);
     }
     ext_route_refresh();
-    answer(B_TRUE, "");
+    answer(cmd, B_TRUE, "");
     return (1);
 }
 
@@ -142,15 +175,15 @@ call_tow_cb(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
     n = bp_ext_route_parse(route_in, poses, BP_EXT_ROUTE_MAX_POSES, reason,
         sizeof (reason));
     if (n < 0) {
-        answer(B_FALSE, reason);
+        answer(cmd, B_FALSE, reason);
         return (1);
     }
     if (!bp_tow_call(tow_kind, poses, n, reason, sizeof (reason))) {
-        answer(B_FALSE, reason);
+        answer(cmd, B_FALSE, reason);
         return (1);
     }
     ext_route_refresh();
-    answer(B_TRUE, "");
+    answer(cmd, B_TRUE, "");
     return (1);
 }
 
@@ -165,11 +198,11 @@ continue_tow_cb(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
     if (phase != xplm_CommandBegin)
         return (1);
     if (!bp_continue_from_hold(reason, sizeof (reason))) {
-        answer(B_FALSE, reason);
+        answer(cmd, B_FALSE, reason);
         return (1);
     }
     ext_route_refresh();
-    answer(B_TRUE, "");
+    answer(cmd, B_TRUE, "");
     return (1);
 }
 
@@ -189,7 +222,7 @@ load_scenery_cb(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
     ok = bp_route_load_scenery(scenery_index, reason, sizeof (reason));
     refresh_stand();
     ext_route_refresh();
-    answer(ok, ok ? "" : reason);
+    answer(cmd, ok, ok ? "" : reason);
     return (1);
 }
 
@@ -204,11 +237,11 @@ preposition_cb(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
     if (phase != xplm_CommandBegin)
         return (1);
     if (!bp_preposition_call(reason, sizeof (reason))) {
-        answer(B_FALSE, reason);
+        answer(cmd, B_FALSE, reason);
         return (1);
     }
     ext_route_refresh();
-    answer(B_TRUE, "");
+    answer(cmd, B_TRUE, "");
     return (1);
 }
 
@@ -223,11 +256,11 @@ emergency_stop_cb(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
     if (phase != xplm_CommandBegin)
         return (1);
     if (!bp_emergency_stop(reason, sizeof (reason))) {
-        answer(B_FALSE, reason);
+        answer(cmd, B_FALSE, reason);
         return (1);
     }
     ext_route_refresh();
-    answer(B_TRUE, "");
+    answer(cmd, B_TRUE, "");
     return (1);
 }
 
@@ -241,11 +274,11 @@ clear_route_cb(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
     if (phase != xplm_CommandBegin)
         return (1);
     if (!bp_route_clear_external(reason, sizeof (reason))) {
-        answer(B_FALSE, reason);
+        answer(cmd, B_FALSE, reason);
         return (1);
     }
     ext_route_refresh();
-    answer(B_TRUE, "");
+    answer(cmd, B_TRUE, "");
     return (1);
 }
 
@@ -310,7 +343,7 @@ slot_cb(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
     if (phase != xplm_CommandBegin)
         return (1);
     if (route_slot != 1 && route_slot != 2) {
-        answer(B_FALSE, "bp/route_slot must be 1 or 2");
+        answer(cmd, B_FALSE, "bp/route_slot must be 1 or 2");
         return (1);
     }
     ok = save ?
@@ -320,7 +353,7 @@ slot_cb(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
         sizeof (reason));
     refresh_stand();
     ext_route_refresh();
-    answer(ok, ok ? "" : reason);
+    answer(cmd, ok, ok ? "" : reason);
     return (1);
 }
 

@@ -47,6 +47,7 @@
 #include "emergency_tow.h"
 #include "tow_session.h"
 #include "ext_api.h"
+#include "ext_api_answer.h"
 #include "ff_a320_intf.h"
 #include "ground_ops_ui.h"
 #include "msg.h"
@@ -530,7 +531,7 @@ start_pb_handler_(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
 }
 
 static int
-start_pb_handler(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
+start_pb_dispatch(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
 {
     if (phase != xplm_CommandEnd )
     return (1);
@@ -546,6 +547,56 @@ start_pb_handler(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
     {
         return start_pb_handler_(cmd, phase, refcon);
     }
+}
+
+/*
+ * Version 19: every command answers at once (bp/answer_*). Why an original
+ * command cannot act is worked out first, as its handler checks it; whether
+ * it acted is seen afterwards.
+ */
+static const char *
+start_refusal(void)
+{
+    const char *reason = NULL;
+
+    if (!bp_init())
+        return ("BetterPushback cannot work with this aircraft");
+    if (get_pref_widget_status())
+        return ("the preferences window is open");
+    if (!start_pb_enable)
+        return (bp_started ? "an operation is already under way" :
+            "starting is not possible now");
+    if (!bp_started && bp_num_segs() > 0 && !bp_can_start(&reason) &&
+        reason != NULL)
+        return (reason);
+    return (NULL);
+}
+
+static int
+start_pb_handler(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
+{
+    bool_t was_started, was_planning, was_pending, acted;
+    pushback_step_t step;
+    const char *refused;
+    int res;
+
+    if (phase != xplm_CommandEnd)
+        return (1);
+    refused = start_refusal();
+    was_started = bp_started;
+    was_planning = bp_cam_is_running();
+    was_pending = tug_pending_mode;
+    step = bp_current_step();
+    (void)bp_ext_answer_enter();
+    res = start_pb_dispatch(cmd, phase, refcon);
+    /* Started, the planner opened for the plan, or the waiting tug sent. */
+    acted = (bp_started && !was_started) ||
+        (bp_cam_is_running() && !was_planning) ||
+        (was_pending && !tug_pending_mode) || bp_current_step() != step;
+    bp_ext_answer_outer("BetterPushback/start", acted, refused != NULL ?
+        refused : "the push could not start; see Log.txt");
+    bp_ext_answer_leave();
+    return (res);
 }
 
 static int
@@ -583,7 +634,7 @@ manual_push_start_no_yoke_handler(XPLMCommandRef cmd, XPLMCommandPhase phase, vo
 }
 
 static int
-stop_pb_handler(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
+stop_pb_handler_(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
 {
     UNUSED(cmd);
     UNUSED(refcon);
@@ -615,20 +666,53 @@ stop_pb_handler(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
     return (1);
 }
 
+/* BetterPushback/stop answers (version 19). */
+static int
+stop_pb_handler(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
+{
+    const char *refused = NULL;
+    int res;
+
+    if (phase != xplm_CommandEnd)
+        return (1);
+    if (slave_mode)
+        refused = "in a shared cockpit the operation is stopped on the "
+            "master's side";
+    else if (!bp_init())
+        refused = "BetterPushback cannot work with this aircraft";
+    else if (!stop_pb_enable)
+        refused = "there is nothing to stop now";
+    (void)bp_ext_answer_enter();
+    res = stop_pb_handler_(cmd, phase, refcon);
+    bp_ext_answer_outer("BetterPushback/stop", refused == NULL, refused);
+    bp_ext_answer_leave();
+    return (res);
+}
+
 static int
 pause_pb_handler(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
 {
+    bool_t ok;
+
     UNUSED(cmd);
     UNUSED(refcon);
 
     if (phase != xplm_CommandEnd)
         return (1);
     if (bp_pause_is_requested()) {
-        if (!bp_request_resume())
+        ok = bp_request_resume();
+        if (!ok)
             logMsg(BP_WARN_LOG "Automatic push resume request rejected");
-    } else if (!bp_request_pause()) {
-        logMsg(BP_WARN_LOG "Automatic push pause request rejected in the "
-            "current controller state");
+        bp_ext_answer_outer("BetterPushback/pause_resume", ok,
+            "the push cannot resume now");
+    } else {
+        ok = bp_request_pause();
+        if (!ok) {
+            logMsg(BP_WARN_LOG "Automatic push pause request rejected in "
+                "the current controller state");
+        }
+        bp_ext_answer_outer("BetterPushback/pause_resume", ok,
+            "only a push or tow under way can be paused");
     }
     return (1);
 }
@@ -803,30 +887,77 @@ connect_first_begin(bool_t emergency)
     return (1);
 }
 
+/* Why the tug cannot be called now, or NULL (version 19). */
+static const char *
+connect_refusal(bool_t emergency)
+{
+    if (!bp_init())
+        return ("BetterPushback cannot work with this aircraft");
+    if (bp_started)
+        return ("an operation is already under way");
+    if (slave_mode)
+        return ("in a shared cockpit the tug is called on the master's side");
+    if (!conn_first_enable)
+        return ("calling the tug is not possible now");
+    if (get_pref_widget_status())
+        return ("the preferences window is open");
+    if (emergency && !op_complete)
+        return ("the previous ground operation is not complete");
+    if (emergency && emergency_tow_is_active())
+        return ("an Emergency Tow is already under way");
+    return (NULL);
+}
+
+/* Calls the tug as connect_first does, and answers. */
+static int
+connect_answered(const char *command, bool_t emergency)
+{
+    const char *refused = connect_refusal(emergency);
+    int res = connect_first_begin(emergency);
+
+    bp_ext_answer_outer(command, refused == NULL && bp_started,
+        refused != NULL ? refused : "the tug cannot come: the aircraft must "
+        "be stopped on the ground with its gear down");
+    return (res);
+}
+
 static int
 conn_first_handler(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
 {
+    int res;
+
     UNUSED(cmd);
     UNUSED(refcon);
 
     if (phase != xplm_CommandEnd)
         return (1);
+    (void)bp_ext_answer_enter();
     /* A prepositioned tug is called in to connect (version 14). */
-    if (bp_preposition_release())
+    if (bp_preposition_release()) {
+        bp_ext_answer_outer("BetterPushback/connect_first", B_TRUE, NULL);
+        bp_ext_answer_leave();
         return (1);
-    return (connect_first_begin(B_FALSE));
+    }
+    res = connect_answered("BetterPushback/connect_first", B_FALSE);
+    bp_ext_answer_leave();
+    return (res);
 }
 
 static int
 emergency_tow_handler(XPLMCommandRef cmd, XPLMCommandPhase phase,
     void *refcon)
 {
+    int res;
+
     UNUSED(cmd);
     UNUSED(refcon);
 
     if (phase != xplm_CommandEnd)
         return (1);
-    return (connect_first_begin(B_TRUE));
+    (void)bp_ext_answer_enter();
+    res = connect_answered("BetterPushback/call_emergency_tow", B_TRUE);
+    bp_ext_answer_leave();
+    return (res);
 }
 
 static int
@@ -1803,6 +1934,7 @@ abort_push_handler(XPLMCommandRef cmd, XPLMCommandPhase phase,
     logMsg(BP_INFO_LOG "bp_fini called from abort_push_handler, bp_started = %d", bp_started);
     slave_mode = B_FALSE;
     coupled_state_change();
+    bp_ext_answer_outer("BetterPushback/abort_push", B_TRUE, NULL);
     return (1);
 }
 

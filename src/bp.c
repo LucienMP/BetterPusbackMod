@@ -62,6 +62,7 @@
 #include "emergency_tow.h"
 #include "tow_session.h"
 #include "ext_api_handoff.h"
+#include "ext_api_answer.h"
 #include "ext_api_tugpath.h"
 #include "ext_api_surface.h"
 #include "ext_api_tug.h"
@@ -4135,12 +4136,26 @@ disco_win_draw(XPLMWindowID inWindowID, void *inRefcon) {
 static int
 disco_handler(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon) {
     UNUSED(cmd);
-    UNUSED(phase);
     UNUSED(refcon);
 
-    if (bp.step != PB_STEP_WAITING4OK2DISCO)
+    if (bp.step != PB_STEP_WAITING4OK2DISCO) {
+        if (phase == xplm_CommandBegin) {
+            bp_ext_answer_outer("BetterPushback/disconnect", B_FALSE,
+                "the tug is disconnected only once the push has stopped");
+        }
         return (0);
+    }
+    /* Another plugin holds it connected (version 16): refused, with why. */
+    if (bp_ext_handoff_holds_connected()) {
+        if (phase == xplm_CommandBegin) {
+            bp_ext_answer_outer("BetterPushback/disconnect", B_FALSE,
+                bp_ext_handoff_hold_status());
+        }
+        return (1);
+    }
     bp.ok2disco = B_TRUE;
+    if (phase == xplm_CommandBegin)
+        bp_ext_answer_outer("BetterPushback/disconnect", B_TRUE, NULL);
 
     return (1);
 }
@@ -4150,11 +4165,17 @@ clear_ack_handler(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
 {
     UNUSED(cmd);
     UNUSED(refcon);
-    if (!bp_started || bp.step != PB_STEP_CLEAR_SIGNAL)
+    if (!bp_started || bp.step != PB_STEP_CLEAR_SIGNAL) {
+        if (phase == xplm_CommandBegin) {
+            bp_ext_answer_outer("BetterPushback/acknowledge_clear", B_FALSE,
+                "the tug driver is not showing the clear signal");
+        }
         return (0);
-    if (phase == xplm_CommandBegin &&
-        bp_clear_signal_acknowledge(&bp.clear_signal_gate, true)) {
-        logMsg(BP_INFO_LOG "Pilot acknowledged the pin and clear signal");
+    }
+    if (phase == xplm_CommandBegin) {
+        if (bp_clear_signal_acknowledge(&bp.clear_signal_gate, true))
+            logMsg(BP_INFO_LOG "Pilot acknowledged the pin and clear signal");
+        bp_ext_answer_outer("BetterPushback/acknowledge_clear", B_TRUE, NULL);
     }
     return (1);
 }
@@ -4162,11 +4183,17 @@ clear_ack_handler(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
 static int
 recon_handler(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon) {
     UNUSED(cmd);
-    UNUSED(phase);
     UNUSED(refcon);
 
-    if (bp.step != PB_STEP_WAITING4OK2DISCO)
+    if (bp.step != PB_STEP_WAITING4OK2DISCO) {
+        if (phase == xplm_CommandBegin) {
+            bp_ext_answer_outer("BetterPushback/reconnect", B_FALSE,
+                "the tug can reconnect only while it waits to disconnect");
+        }
         return (0);
+    }
+    if (phase == xplm_CommandBegin)
+        bp_ext_answer_outer("BetterPushback/reconnect", B_TRUE, NULL);
 
     /*
      * Reconnection works as follows:

@@ -14,6 +14,7 @@
 #include <acfutils/log.h>
 
 #include "bp.h"
+#include "ext_api_answer.h"
 #include "ext_api.h"
 #include "ext_tug.h"
 #include "ext_api_handoff.h"
@@ -81,6 +82,9 @@ static dr_t msg_channel_dr;
 static dr_t external_block_dr, external_block_text_dr, external_block_owner_dr;
 static dr_t chocks_external_dr, walkers_external_dr, walkers_needed_dr,
     pin_shown_dr;
+/* Version 19: every command answers. */
+static dr_t answer_seq_dr, answer_status_dr, answer_command_dr,
+    answer_reason_dr;
 /* Version 16: the tug held connected after the push. */
 static dr_t hold_connected_dr, hold_connected_text_dr;
 static int walkers_needed = 0, pin_shown = 0;
@@ -225,6 +229,18 @@ ext_api_init(void)
     ext_route_init();
     ext_tug_init();
     bp_ext_handoff_reset();
+    bp_ext_answer_reset();
+    {
+        bp_ext_answer_t *answer = bp_ext_answer_store();
+
+        dr_create_i(&answer_seq_dr, &answer->seq, B_FALSE, "bp/answer_seq");
+        dr_create_i(&answer_status_dr, &answer->status, B_FALSE,
+            "bp/answer_status");
+        dr_create_b(&answer_command_dr, answer->command,
+            sizeof (answer->command), B_FALSE, "bp/answer_command");
+        dr_create_b(&answer_reason_dr, answer->reason,
+            sizeof (answer->reason), B_FALSE, "bp/answer_reason");
+    }
     {
         bp_ext_handoff_t *h = bp_ext_handoff();
 
@@ -325,6 +341,10 @@ ext_api_fini(void)
     }
     ext_route_fini();
     ext_tug_fini();
+    dr_delete(&answer_seq_dr);
+    dr_delete(&answer_status_dr);
+    dr_delete(&answer_command_dr);
+    dr_delete(&answer_reason_dr);
     dr_delete(&external_block_dr);
     dr_delete(&external_block_text_dr);
     dr_delete(&external_block_owner_dr);
