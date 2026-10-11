@@ -16,6 +16,7 @@
 #include "bp.h"
 #include "ext_api.h"
 #include "ext_tug.h"
+#include "ext_api_handoff.h"
 #include "ext_api_msgs.h"
 #include "ext_api_state.h"
 #include "ground_ops_ui.h"
@@ -76,6 +77,11 @@ static dr_t msg_voice_dr;
 static dr_t msg_duration_dr;
 static dr_t msg_playing_dr;
 static dr_t msg_channel_dr;
+/* Version 13: what another plugin takes over. */
+static dr_t external_block_dr, external_block_text_dr, external_block_owner_dr;
+static dr_t chocks_external_dr, walkers_external_dr, walkers_needed_dr,
+    pin_shown_dr;
+static int walkers_needed = 0, pin_shown = 0;
 static dr_t voice_mode_dr;
 static dr_t voice_done_seq_dr;
 static dr_t voice_heartbeat_dr;
@@ -134,6 +140,10 @@ blocker_public(bp_blocker_t blocker)
         return (BP_EXT_BLOCKER_RELEASE_PARKING_BRAKE);
     case BP_BLOCKER_PLAN_REQUIRED:
         return (BP_EXT_BLOCKER_PLAN_REQUIRED);
+    case BP_BLOCKER_EXTERNAL:
+        return (BP_EXT_BLOCKER_EXTERNAL);
+    case BP_BLOCKER_CHOCKS:
+        return (BP_EXT_BLOCKER_CHOCKS);
     case BP_BLOCKER_NONE:
     default:
         return (BP_EXT_BLOCKER_NONE);
@@ -163,6 +173,8 @@ refresh(void)
     published = next;
     msg_ext_voice_poll();
     voice_external = msg_ext_voice_active() ? 1 : 0;
+    walkers_needed = bp_walker_needed() ? 1 : 0;
+    pin_shown = (bp_current_step() == PB_STEP_CLEAR_SIGNAL) ? 1 : 0;
     refresh_line();
     ext_route_refresh();
 }
@@ -208,6 +220,24 @@ ext_api_init(void)
     line_source_seq = 0;
     ext_route_init();
     ext_tug_init();
+    bp_ext_handoff_reset();
+    {
+        bp_ext_handoff_t *h = bp_ext_handoff();
+
+        dr_create_i(&external_block_dr, &h->external_block, B_TRUE,
+            "bp/external_block");
+        dr_create_b(&external_block_text_dr, h->text, sizeof (h->text), B_TRUE,
+            "bp/external_block_text");
+        dr_create_b(&external_block_owner_dr, h->owner, sizeof (h->owner),
+            B_TRUE, "bp/external_block_owner");
+        dr_create_i(&chocks_external_dr, &h->chocks_external, B_TRUE,
+            "bp/chocks_external");
+        dr_create_i(&walkers_external_dr, &h->walkers_external, B_TRUE,
+            "bp/walkers_external");
+    }
+    dr_create_i(&walkers_needed_dr, &walkers_needed, B_FALSE,
+        "bp/walkers_needed");
+    dr_create_i(&pin_shown_dr, &pin_shown, B_FALSE, "bp/pin_shown");
     refresh();
 
     dr_create_i(&api_version_dr, &api_version, B_FALSE, "bp/api_version");
@@ -287,6 +317,13 @@ ext_api_fini(void)
     }
     ext_route_fini();
     ext_tug_fini();
+    dr_delete(&external_block_dr);
+    dr_delete(&external_block_text_dr);
+    dr_delete(&external_block_owner_dr);
+    dr_delete(&chocks_external_dr);
+    dr_delete(&walkers_external_dr);
+    dr_delete(&walkers_needed_dr);
+    dr_delete(&pin_shown_dr);
     dr_delete(&api_version_dr);
     dr_delete(&plugin_version_dr);
     dr_delete(&push_speed_dr);

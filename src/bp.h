@@ -211,7 +211,9 @@ typedef enum {
     BP_BLOCKER_AIRCRAFT_NOT_READY,      /* a door open, GPU or ASU connected */
     BP_BLOCKER_SET_PARKING_BRAKE,
     BP_BLOCKER_RELEASE_PARKING_BRAKE,
-    BP_BLOCKER_PLAN_REQUIRED
+    BP_BLOCKER_PLAN_REQUIRED,
+    BP_BLOCKER_EXTERNAL,                /* another plugin's (version 13) */
+    BP_BLOCKER_CHOCKS                   /* chocked, chocks are another plugin's */
 } bp_blocker_t;
 
 bp_blocker_t bp_current_blocker(void);
@@ -257,6 +259,9 @@ double bp_tug_distance_to_aircraft(void);
 int bp_route_legs(bp_ext_leg_t *legs, int max);
 /* The speeds the route will be driven at (m/s) and the acceleration (m/s^2). */
 void bp_route_speeds(double *fwd, double *rev, double *accel);
+/* The wing walker would be shown on this operation (published as
+ * bp/walkers_needed when another plugin draws the walkers). */
+bool_t bp_walker_needed(void);
 /* Why a recovery tow cannot be done here, or NULL. */
 const char *bp_recovery_refused(void);
 /* Stops the push or tow at once, the tug kept connected, held until

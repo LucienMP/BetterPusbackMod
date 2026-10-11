@@ -61,6 +61,8 @@
 #include "cfg.h"
 #include "emergency_tow.h"
 #include "tow_session.h"
+#include "ext_api_handoff.h"
+#include "ext_api_state.h"
 #include "ext_api_msgs.h"
 #include "ground_ops_ui.h"
 #include "msg.h"
@@ -189,6 +191,8 @@ static struct {
 } doors_info = {0};
 
 static bp_blocker_t bp_blocker = BP_BLOCKER_NONE;
+/* The wing walker would be shown on the running operation (version 13). */
+static bool_t walker_needed = B_FALSE;
 
 bp_state_t bp = {0};
 bp_long_state_t bp_ls = {0};
@@ -2775,6 +2779,12 @@ bp_route_speeds(double *fwd, double *rev, double *accel)
     }
 }
 
+bool_t
+bp_walker_needed(void)
+{
+    return (bp_started && walker_needed);
+}
+
 const char *
 bp_recovery_refused(void)
 {
@@ -2917,8 +2927,11 @@ pb_step_tug_load(void) {
     tug_max_rev_spd = bp.veh.max_rev_spd;
     bool_t display_marshaller = B_TRUE;
     (void)conf_get_b(bp_conf, "display_marshaller", &display_marshaller);
-    if (wing_walker_should_allocate(display_marshaller != B_FALSE,
-        emergency_tow_allows_wing_walker()) && bp_ls.wing_walker == NULL) {
+    walker_needed = (display_marshaller != B_FALSE &&
+        emergency_tow_allows_wing_walker());
+    if (wing_walker_should_allocate(bp_ext_handoff_draws_walker(
+        display_marshaller != B_FALSE), emergency_tow_allows_wing_walker()) &&
+        bp_ls.wing_walker == NULL) {
         char *walker_path = mkpathname(bp_xpdir, bp_plugindir, "objects",
             "wing_walker", "wing_walker.obj", NULL);
 
@@ -3397,8 +3410,19 @@ pb_step_connected(void) {
         bp_hint_status_str = _("Waiting for the parking brakes release");
         if (parking_brake_set)
             bp_blocker = BP_BLOCKER_RELEASE_PARKING_BRAKE;
+    } else if (bp_ext_handoff_start_blocker(acf_chocked()) != 0) {
+        /* Another plugin's blocker, or chocks it has yet to remove. */
+        bp.step_start_t = bp.cur_t;
+        if (bp_ext_handoff_start_blocker(acf_chocked()) == BP_EXT_BLOCKER_CHOCKS) {
+            bp_hint_status_str = _("Waiting for the chocks to be removed");
+            bp_blocker = BP_BLOCKER_CHOCKS;
+        } else {
+            bp_hint_status_str = bp_ext_handoff_status();
+            bp_blocker = BP_BLOCKER_EXTERNAL;
+        }
     } else if (bp.cur_t - bp.step_start_t >= STATE_TRANS_DELAY) {
-        bool_t chocks_removed = chocks_remove();
+        bool_t chocks_removed = bp_ext_handoff_removes_chocks() ?
+            chocks_remove() : B_FALSE;
 
         if (!slave_mode) {
             bool_t backward = true;
@@ -4676,7 +4700,11 @@ bp_run(float elapsed, float elapsed2, int counter, void *refcon) {
             break;
         case PB_STEP_OPENING_CRADLE: {
             bp_hint_status_str = _("Waiting for doors/GPU/ASU closed/disconnected");
-            if (acf_doors_closed(B_TRUE)) {
+            if (bp_ext_handoff_blocks_connect()) {
+                bp_hint_status_str = bp_ext_handoff_status();
+                bp_blocker = BP_BLOCKER_EXTERNAL;
+                bp.step_start_t = bp.cur_t;
+            } else if (acf_doors_closed(B_TRUE)) {
                 disable_replanning();
                 bp_hint_status_str = _("Opening the cradle");
                 double d_t = bp.cur_t - bp.step_start_t;

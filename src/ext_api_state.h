@@ -17,7 +17,7 @@ extern "C" {
 #endif
 
 /* Raised whenever the published interface gains something (never lowered). */
-#define BP_EXT_API_VERSION 12
+#define BP_EXT_API_VERSION 13
 
 #define BP_EXT_NAME_LEN 32
 
@@ -75,7 +75,9 @@ typedef enum {
     BP_EXT_BLOCKER_AIRCRAFT_NOT_READY = 1,      /* door open, GPU/ASU on */
     BP_EXT_BLOCKER_SET_PARKING_BRAKE = 2,
     BP_EXT_BLOCKER_RELEASE_PARKING_BRAKE = 3,
-    BP_EXT_BLOCKER_PLAN_REQUIRED = 4
+    BP_EXT_BLOCKER_PLAN_REQUIRED = 4,
+    BP_EXT_BLOCKER_EXTERNAL = 5,                /* another plugin's (version 13) */
+    BP_EXT_BLOCKER_CHOCKS = 6                   /* chocks fitted, removed by another plugin */
 } bp_ext_blocker_t;
 
 #define BP_EXT_ITEM_LEN 64

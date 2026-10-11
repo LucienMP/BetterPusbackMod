@@ -125,7 +125,7 @@ bp_ext_stage_name(int stage)
 /* Indexed by the public blocker number. */
 static const char *const blocker_names[] = {
     "none", "aircraft_not_ready", "set_parking_brake",
-    "release_parking_brake", "plan_required"
+    "release_parking_brake", "plan_required", "external", "chocks"
 };
 
 const char *

@@ -33,7 +33,7 @@ a pilot who uses it on its own.
 
 | Dataref | Type | Meaning |
 | --- | --- | --- |
-| `bp/api_version` | int | Interface version (this document: 12) |
+| `bp/api_version` | int | Interface version (this document: 13) |
 | `bp/state_seq` | int | Changes whenever a value below changes |
 | `bp/started` | int | An operation is running (existing dataref) |
 | `bp/emergency_tow` | int | The running operation is the Emergency Tow |
@@ -204,6 +204,8 @@ part of the operation state: `bp/state_seq` moves when they change.
 | 2 | `set_parking_brake` | The parking brake is set (before connecting, or after the push) |
 | 3 | `release_parking_brake` | The parking brake is released (connected, ready to push) |
 | 4 | `plan_required` | A push route is planned |
+| 5 | `external` | Another plugin clears its blocker (version 13); `bp/status_text` has its words |
+| 6 | `chocks` | The chocks are removed by the plugin that owns them (version 13) |
 
 The item kind is a best guess from the dataref's name. Aircraft without a
 `BetterPushback_doors.cfg` entry are checked with X-Plane's own doors and
@@ -531,6 +533,30 @@ The times are kept after the operation until the next one starts. The
 estimates before calling the tug use today's drive-up; they become
 truthful per airport once the tug drives from a real parking.
 
+## Version 13: what another plugin takes over
+
+A ground-handling plugin runs the rest of the turnaround around the push.
+These let it take over the parts both would otherwise do, and tell
+BetterPushback what only it knows.
+
+| Dataref | Type | Written by | Meaning |
+| --- | --- | --- | --- |
+| `bp/external_block` | int, writable | the other plugin | 1: the tug must not connect, nor the push start (a belt loader still at the aft hold, the catering truck lowering) |
+| `bp/external_block_text` | byte[96], writable | the other plugin | Why, in its words; shown as "Waiting: ..." in `bp/status_text` and the panel |
+| `bp/external_block_owner` | byte[32], writable | the other plugin | Its name, for the log |
+| `bp/chocks_external` | int, writable | the other plugin | 1: BetterPushback leaves the chocks alone (no removal as the push starts, version 7) and a chocked aircraft blocks the push start (blocker 6 `chocks`) until the other plugin's crew removes them |
+| `bp/walkers_external` | int, writable | the other plugin | 1: BetterPushback draws no wing walker; the other plugin draws its own |
+| `bp/walkers_needed` | int | BetterPushback | 1 while an operation runs on which BetterPushback would have shown its wing walker |
+| `bp/pin_shown` | int | BetterPushback | 1 while the tug driver shows the bypass pin (the clear signal), for the other plugin's headset crew to answer it |
+
+- The external blocker is checked before the tug drives up to the nose wheel
+  (where the doors are checked) and again before the push starts. Clearing it
+  lets the operation go on by itself. While blocked, `bp/blocker` reads 5
+  `external`.
+- All three take effect for the next operation if set while one is running,
+  except the blocker, which acts at once.
+- Without another plugin nothing changes: the defaults are 0.
+
 ## Testing
 
 ### Unit tests
@@ -554,6 +580,10 @@ All run as part of `tests/run_all_tests.sh`:
 - `tests/run_ext_api_msgs_tests.sh` also checks the tug driver's tow lines:
   their fixed numbers and keys, their texts, and that only they are on the
   ground channel.
+- `tests/run_ext_api_handoff_tests.sh` checks that nothing changes by
+  default, that an external blocker holds the connection and the start with
+  the other plugin's words (a text it did not terminate is cut), and that
+  chocks and walkers left to the other plugin behave as described.
 - `tests/run_ext_api_tug_tests.sh` checks the tug's state for every step
   (never going back during an operation), the route time with its stops and
   pauses at each change of direction, the arrival estimate, and that each
