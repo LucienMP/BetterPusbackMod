@@ -33,7 +33,7 @@ a pilot who uses it on its own.
 
 | Dataref | Type | Meaning |
 | --- | --- | --- |
-| `bp/api_version` | int | Interface version (this document: 11) |
+| `bp/api_version` | int | Interface version (this document: 12) |
 | `bp/state_seq` | int | Changes whenever a value below changes |
 | `bp/started` | int | An operation is running (existing dataref) |
 | `bp/emergency_tow` | int | The running operation is the Emergency Tow |
@@ -506,6 +506,31 @@ aircraft stuck on a runway with burst tyres or failed brakes.
 | --- | --- |
 | `BetterPushback/emergency_stop` | Stop the push or tow at once: the tug brakes as hard as it can (about 2 m from tow speed) and stays connected. It then holds as at a hold point: `bp/hold` 1, `bp/hold_reason` "emergency stop", `bp/tow_state` 3. `BetterPushback/continue_tow` goes on; `BetterPushback/stop` ends the operation where it stands. Answered like `load_route`; refused, with the reason, when nothing is being pushed or towed |
 
+## Version 12: the tug, estimates and milestones
+
+What another plugin needs to show the tug among its own vehicles, to say
+truthfully how long things will take, and to report the operation's times.
+The tug's state and the milestones are part of the operation state:
+`bp/state_seq` moves when they change.
+
+| Dataref | Type | Meaning |
+| --- | --- | --- |
+| `bp/tug_state` | int | 0 none, 1 at its parking (a later version), 2 driving in, 3 at the stand waiting to connect, 4 connecting, 5 connected, 6 moving (pushing or towing, stopping at the end), 7 disconnecting (lowering, moving clear), 8 returning (driving away) |
+| `bp/tug_state_name` | byte[16] | `none`, `at_parking`, `driving_in`, `at_stand`, `connecting`, `connected`, `moving`, `disconnecting`, `returning` |
+| `bp/tug_lat`, `bp/tug_lon`, `bp/tug_hdg` | float | Where the tug is and its true heading; 0 when there is no tug |
+| `bp/tug_eta_s` | float | Seconds until the tug reaches the aircraft while driving in; 0 once there; -1 without a tug |
+| `bp/tug_origin` | byte[48] | Where the tug came from (its parking's name); empty until the tug drives from a real parking (a later version) |
+| `bp/tug_eta_if_called_s` | float | Before the tug is called: seconds from calling it until it would be connected (an estimate); -1 once it is called |
+| `bp/connect_time_s` | float | Seconds from the tug's arrival to connected (an estimate) |
+| `bp/route_time_s` | float | Seconds to drive the current route at the tug's speeds, with the stops and pauses at each change of direction; -1 without a route |
+| `bp/time_off_blocks` | float | Zulu seconds when the aircraft first moved under the tug (the airline's OUT time); -1 before |
+| `bp/time_push_complete` | float | Zulu seconds when it stopped at the end of the route; -1 before |
+| `bp/time_tug_clear` | float | Zulu seconds when the tug, disconnected, drove away; -1 before |
+
+The times are kept after the operation until the next one starts. The
+estimates before calling the tug use today's drive-up; they become
+truthful per airport once the tug drives from a real parking.
+
 ## Testing
 
 ### Unit tests
@@ -529,6 +554,10 @@ All run as part of `tests/run_all_tests.sh`:
 - `tests/run_ext_api_msgs_tests.sh` also checks the tug driver's tow lines:
   their fixed numbers and keys, their texts, and that only they are on the
   ground channel.
+- `tests/run_ext_api_tug_tests.sh` checks the tug's state for every step
+  (never going back during an operation), the route time with its stops and
+  pauses at each change of direction, the arrival estimate, and that each
+  milestone is set once and kept.
 - `tests/run_tow_session_tests.sh` checks the tows' fixed numbers and names,
   the refusals with their reasons, the state following the controller (and
   staying done or failed after a tow), the speed limit, that tows are not

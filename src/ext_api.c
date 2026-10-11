@@ -15,6 +15,7 @@
 
 #include "bp.h"
 #include "ext_api.h"
+#include "ext_tug.h"
 #include "ext_api_msgs.h"
 #include "ext_api_state.h"
 #include "ground_ops_ui.h"
@@ -156,6 +157,9 @@ refresh(void)
     blocker.status = bp_status_text();
     bp_ext_state_from(&raw, ground_ops_state_get(&snapshot_cache), &blocker,
         &published, &next);
+    /* The tug's state and the milestones are part of the operation state. */
+    if (ext_tug_refresh())
+        next.state_seq++;
     published = next;
     msg_ext_voice_poll();
     voice_external = msg_ext_voice_active() ? 1 : 0;
@@ -203,6 +207,7 @@ ext_api_init(void)
     memset(&line, 0, sizeof (line));
     line_source_seq = 0;
     ext_route_init();
+    ext_tug_init();
     refresh();
 
     dr_create_i(&api_version_dr, &api_version, B_FALSE, "bp/api_version");
@@ -281,6 +286,7 @@ ext_api_fini(void)
         refresh_loop = NULL;
     }
     ext_route_fini();
+    ext_tug_fini();
     dr_delete(&api_version_dr);
     dr_delete(&plugin_version_dr);
     dr_delete(&push_speed_dr);

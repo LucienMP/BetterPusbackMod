@@ -2722,6 +2722,59 @@ bp_hold_point_text(void)
     return (bp_hold_point_active() ? bp.hold_point_text : "");
 }
 
+bool_t
+bp_tug_position(double *lat, double *lon, double *hdg, double *spd)
+{
+    double alt;
+
+    if (!bp_started || bp_ls.tug == NULL)
+        return (B_FALSE);
+    /* X-Plane's Z axis is flipped to ours */
+    XPLMLocalToWorld(bp_ls.tug->pos.pos.x, dr_getf(&drs.local_y),
+        -bp_ls.tug->pos.pos.y, lat, lon, &alt);
+    *hdg = normalize_hdg(bp_ls.tug->pos.hdg);
+    *spd = bp_ls.tug->pos.spd;
+    return (B_TRUE);
+}
+
+double
+bp_tug_distance_to_aircraft(void)
+{
+    if (!bp_started || bp_ls.tug == NULL)
+        return (-1);
+    return (vect2_dist(bp_ls.tug->pos.pos, bp.cur_pos.pos));
+}
+
+int
+bp_route_legs(bp_ext_leg_t *legs, int max)
+{
+    int n = 0;
+
+    for (const seg_t *seg = list_head(&bp.segs); seg != NULL && n < max;
+        seg = list_next(&bp.segs, seg)) {
+        legs[n].len = (seg->type == SEG_TYPE_STRAIGHT) ? seg->len :
+            fabs(DEG2RAD(rel_hdg(seg->start_hdg, seg->end_hdg))) * seg->turn.r;
+        legs[n].backward = (seg->backward != B_FALSE);
+        n++;
+    }
+    return (n);
+}
+
+void
+bp_route_speeds(double *fwd, double *rev, double *accel)
+{
+    if (bp_started && bp_ls.tug != NULL) {
+        *fwd = bp.veh.max_fwd_spd;
+        *rev = bp.veh.max_rev_spd;
+        *accel = bp.veh.max_accel;
+    } else {
+        /* Before the tug is chosen: the usual limits. */
+        *fwd = MIN(MAX_FWD_SPEED, 2.5);
+        *rev = MAX_REV_SPEED;
+        *accel = NORMAL_ACCEL;
+    }
+}
+
 const char *
 bp_recovery_refused(void)
 {

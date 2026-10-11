@@ -29,6 +29,7 @@
 #include "clear_signal_gate.h"
 #include "driving.h"
 #include "ext_api_route.h"
+#include "ext_api_tug.h"
 #include "pushback_step.h"
 #include "tug.h"
 #include "wing_walker.h"
@@ -248,6 +249,14 @@ pushback_step_t bp_current_step(void);
 /* At (or stopping at) a hold point of the route, and why it holds. */
 bool_t bp_hold_point_active(void);
 const char *bp_hold_point_text(void);
+/* The tug's position (geographic, true heading) and speed; false: no tug. */
+bool_t bp_tug_position(double *lat, double *lon, double *hdg, double *spd);
+/* Metres from the tug to the aircraft's reference point; -1: no tug. */
+double bp_tug_distance_to_aircraft(void);
+/* The planned route's legs (each segment), for the time estimate. */
+int bp_route_legs(bp_ext_leg_t *legs, int max);
+/* The speeds the route will be driven at (m/s) and the acceleration (m/s^2). */
+void bp_route_speeds(double *fwd, double *rev, double *accel);
 /* Why a recovery tow cannot be done here, or NULL. */
 const char *bp_recovery_refused(void);
 /* Stops the push or tow at once, the tug kept connected, held until
