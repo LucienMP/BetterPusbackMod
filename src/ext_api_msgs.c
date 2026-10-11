@@ -97,7 +97,15 @@ static const struct {
         "start_pb_chocks_nostart", "Removing chocks, and beginning pushback." },
     { MSG_SPOKEN_CHOCKS_TOW_NOSTART,
         BP_EXT_MSG_START_TOW_CHOCKS_NO_ENGINE_START,
-        "start_tow_chocks_nostart", "Removing chocks, and beginning the tow." }
+        "start_tow_chocks_nostart", "Removing chocks, and beginning the tow." },
+    /* The tug driver's lines to Ground: the request and the end are fixed;
+     * holding and crossing name the hold point, so their text varies. */
+    { MSG_SPOKEN_TOW_REQUEST, BP_EXT_MSG_TOW_REQUEST, "tow_request",
+        "Ground, tug ready to tow, requesting the route." },
+    { MSG_SPOKEN_TOW_HOLDING, BP_EXT_MSG_TOW_HOLDING, "tow_holding", "" },
+    { MSG_SPOKEN_TOW_CROSSING, BP_EXT_MSG_TOW_CROSSING, "tow_crossing", "" },
+    { MSG_SPOKEN_TOW_COMPLETE, BP_EXT_MSG_TOW_COMPLETE, "tow_complete",
+        "Ground, tug, tow complete." }
 };
 
 #define SPOKEN_COUNT ((int)(sizeof (spoken) / sizeof (spoken[0])))
@@ -128,6 +136,14 @@ bp_ext_msg_public(message_t msg)
     if ((int)msg < 0 || (int)msg >= MSG_NUM_MSGS)
         return (BP_EXT_MSG_NONE);
     return (lines[msg].public_msg);
+}
+
+int
+bp_ext_msg_channel(int public_msg)
+{
+    return (public_msg >= BP_EXT_MSG_TOW_REQUEST &&
+        public_msg <= BP_EXT_MSG_TOW_COMPLETE ? BP_EXT_CHANNEL_GROUND :
+        BP_EXT_CHANNEL_INTERCOM);
 }
 
 int

@@ -430,6 +430,11 @@ drive_on_line(const vehicle_pos_t *pos, const vehicle_t *veh,
 static double
 next_seg_speed(const vehicle_t *veh, list_t *segs, const seg_t *next,
                bool_t cur_backward) {
+    const seg_t *cur = (next != NULL ? list_prev(segs, next) : NULL);
+
+    /* A hold point at the end of the current segment: come to a stop there. */
+    if (cur != NULL && cur->hold)
+        return (CRAWL_SPEED(bp_xp_ver, veh));
     if (next != NULL && next->backward == cur_backward) {
         if (next->type == SEG_TYPE_STRAIGHT) {
             return (straight_run_speed(veh, segs, next->len,

@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -85,7 +86,7 @@ test_spoken_lines_follow_the_recordings(void)
             assert(strcmp(bp_ext_msg_key(pub),
                 bp_ext_msg_key(bp_ext_msg_public((message_t)m))) != 0);
     }
-    assert(strcmp(bp_ext_msg_key(23), "") == 0);
+    assert(strcmp(bp_ext_msg_key(27), "") == 0);   /* after the last line */
 }
 
 static void
@@ -124,6 +125,35 @@ test_chocks_lines_are_the_start_lines_chocks_first(void)
     }
 }
 
+static void
+test_the_tug_drivers_tow_lines_go_to_ground(void)
+{
+    /* The tow lines follow the chocks lines, and only they are on channel 5. */
+    static const struct {
+        msg_spoken_t kind;
+        int pub;
+        const char *key;
+        bool fixed_text;
+    } tow[] = {
+        { MSG_SPOKEN_TOW_REQUEST, 23, "tow_request", true },
+        { MSG_SPOKEN_TOW_HOLDING, 24, "tow_holding", false },
+        { MSG_SPOKEN_TOW_CROSSING, 25, "tow_crossing", false },
+        { MSG_SPOKEN_TOW_COMPLETE, 26, "tow_complete", true }
+    };
+
+    for (int i = 0; i < 4; i++) {
+        assert(bp_ext_msg_spoken_public(tow[i].kind) == tow[i].pub);
+        assert(strcmp(bp_ext_msg_key(tow[i].pub), tow[i].key) == 0);
+        assert(bp_ext_msg_channel(tow[i].pub) == BP_EXT_CHANNEL_GROUND);
+        /* Holding and crossing name the hold point: their text varies. */
+        assert((bp_ext_msg_text(tow[i].pub)[0] != '\0') == tow[i].fixed_text);
+        if (tow[i].fixed_text)
+            assert(strncmp(bp_ext_msg_text(tow[i].pub), "Ground, tug", 11) == 0);
+    }
+    for (int pub = 1; pub <= 22; pub++)
+        assert(bp_ext_msg_channel(pub) == BP_EXT_CHANNEL_INTERCOM);
+}
+
 int
 main(void)
 {
@@ -133,6 +163,7 @@ main(void)
     test_no_line_is_empty();
     test_spoken_lines_follow_the_recordings();
     test_chocks_lines_are_the_start_lines_chocks_first();
+    test_the_tug_drivers_tow_lines_go_to_ground();
     printf("ext_api_msgs tests passed\n");
     return (0);
 }

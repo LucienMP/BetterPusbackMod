@@ -70,6 +70,12 @@ static char tow_state_name_buf[16] = "idle";
 static dr_t tow_kind_dr, tow_state_dr, tow_state_name_dr, tow_speed_limit_dr;
 static XPLMCommandRef call_tow_cmd = NULL;
 
+/* Hold points (version 10). */
+static int hold = 0;
+static char hold_reason[BP_EXT_ROUTE_REASON_LEN];
+static dr_t hold_dr, hold_reason_dr;
+static XPLMCommandRef continue_tow_cmd = NULL;
+
 static void
 answer(bool_t accepted, const char *reason)
 {
@@ -135,6 +141,25 @@ call_tow_cb(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
         return (1);
     }
     if (!bp_tow_call(tow_kind, poses, n, reason, sizeof (reason))) {
+        answer(B_FALSE, reason);
+        return (1);
+    }
+    ext_route_refresh();
+    answer(B_TRUE, "");
+    return (1);
+}
+
+/* BetterPushback/continue_tow: go on from the hold point. */
+static int
+continue_tow_cb(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
+{
+    char reason[BP_EXT_ROUTE_REASON_LEN] = "";
+
+    (void)cmd;
+    (void)refcon;
+    if (phase != xplm_CommandBegin)
+        return (1);
+    if (!bp_continue_from_hold(reason, sizeof (reason))) {
         answer(B_FALSE, reason);
         return (1);
     }
@@ -261,7 +286,11 @@ ext_route_refresh(void)
         }
     }
 
-    tow_state = (int)tow_session_state((int)bp_current_step(), B_FALSE);
+    hold = bp_hold_point_active() ? 1 : 0;
+    (void)snprintf(hold_reason, sizeof (hold_reason), "%s",
+        bp_hold_point_text());
+    tow_state = (int)tow_session_state((int)bp_current_step(),
+        hold != 0);
     (void)snprintf(tow_state_name_buf, sizeof (tow_state_name_buf), "%s",
         tow_state_name(tow_state));
 
@@ -348,6 +377,15 @@ ext_route_init(void)
     call_tow_cmd = XPLMCreateCommand("BetterPushback/call_tow",
         _("Call the tug to tow along the route another plugin wrote"));
     XPLMRegisterCommandHandler(call_tow_cmd, call_tow_cb, 1, NULL);
+
+    hold = 0;
+    hold_reason[0] = '\0';
+    dr_create_i(&hold_dr, &hold, B_FALSE, "bp/hold");
+    dr_create_b(&hold_reason_dr, hold_reason, sizeof (hold_reason), B_FALSE,
+        "bp/hold_reason");
+    continue_tow_cmd = XPLMCreateCommand("BetterPushback/continue_tow",
+        _("Go on from the hold point"));
+    XPLMRegisterCommandHandler(continue_tow_cmd, continue_tow_cb, 1, NULL);
     inited = B_TRUE;
 }
 
@@ -362,6 +400,9 @@ ext_route_fini(void)
     XPLMUnregisterCommandHandler(save_slot_cmd, slot_cb, 1, (void *)1);
     XPLMUnregisterCommandHandler(load_slot_cmd, slot_cb, 1, NULL);
     XPLMUnregisterCommandHandler(call_tow_cmd, call_tow_cb, 1, NULL);
+    XPLMUnregisterCommandHandler(continue_tow_cmd, continue_tow_cb, 1, NULL);
+    dr_delete(&hold_dr);
+    dr_delete(&hold_reason_dr);
     dr_delete(&tow_kind_dr);
     dr_delete(&tow_state_dr);
     dr_delete(&tow_state_name_dr);

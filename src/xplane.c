@@ -50,6 +50,7 @@
 #include "ff_a320_intf.h"
 #include "ground_ops_ui.h"
 #include "msg.h"
+#include "ext_api_msgs.h"
 #include "tug.h"
 #include "xplane.h"
 #include "wed2route.h"
@@ -1021,6 +1022,8 @@ bp_tow_call(int kind, const bp_ext_pose_t *poses, int n, char *reason,
     enable_menu_items();
     logMsg(BP_INFO_LOG "Tow (%s) called by another plugin with %d positions",
         tow_kind_name(kind), n);
+    msg_speak(MSG_SPOKEN_TOW_REQUEST,
+        _(bp_ext_msg_text(BP_EXT_MSG_TOW_REQUEST)));
     return (B_TRUE);
 }
 

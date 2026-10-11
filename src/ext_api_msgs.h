@@ -49,8 +49,18 @@ typedef enum {
     BP_EXT_MSG_START_PUSHBACK_CHOCKS = 19,
     BP_EXT_MSG_START_TOW_CHOCKS = 20,
     BP_EXT_MSG_START_PUSHBACK_CHOCKS_NO_ENGINE_START = 21,
-    BP_EXT_MSG_START_TOW_CHOCKS_NO_ENGINE_START = 22
+    BP_EXT_MSG_START_TOW_CHOCKS_NO_ENGINE_START = 22,
+    /* The tug driver to Ground on tows (version 10), on channel 5. */
+    BP_EXT_MSG_TOW_REQUEST = 23,
+    BP_EXT_MSG_TOW_HOLDING = 24,
+    BP_EXT_MSG_TOW_CROSSING = 25,
+    BP_EXT_MSG_TOW_COMPLETE = 26
 } bp_ext_msg_t;
+
+/* Who a line is said to (bp/msg_channel): the ground crew to the cockpit on
+ * the intercom, or the tug driver to Ground on its frequency. */
+#define BP_EXT_CHANNEL_INTERCOM 0
+#define BP_EXT_CHANNEL_GROUND 5
 
 int bp_ext_msg_public(message_t msg);
 int bp_ext_msg_spoken_public(msg_spoken_t kind);
@@ -61,6 +71,8 @@ const char *bp_ext_msg_key(int public_msg);
  * messages, whose text is whatever was spoken.
  */
 const char *bp_ext_msg_text(int public_msg);
+/* The line's channel: BP_EXT_CHANNEL_GROUND for the tug driver's tow lines. */
+int bp_ext_msg_channel(int public_msg);
 /* The Ground Operations caption for the line. */
 ground_ops_caption_t bp_ext_msg_caption(int public_msg);
 

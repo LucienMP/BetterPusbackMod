@@ -95,6 +95,12 @@ typedef struct {
      * the segment list.
      */
     bool_t user_placed;
+    /*
+     * The tug stops at this segment's end and holds there until told to go
+     * on (an external route's H line, README-EXTERNAL-API.md version 10).
+     */
+    bool_t hold;
+    char hold_text[96];
 
     list_node_t node;
 } seg_t;

@@ -64,7 +64,15 @@ typedef enum {
     MSG_SPOKEN_CHOCKS_PB,
     MSG_SPOKEN_CHOCKS_TOW,
     MSG_SPOKEN_CHOCKS_PB_NOSTART,
-    MSG_SPOKEN_CHOCKS_TOW_NOSTART
+    MSG_SPOKEN_CHOCKS_TOW_NOSTART,
+    /*
+     * Tows (README-EXTERNAL-API.md versions 9 and 10): the tug driver calling
+     * Ground, published on the ground channel.
+     */
+    MSG_SPOKEN_TOW_REQUEST,
+    MSG_SPOKEN_TOW_HOLDING,
+    MSG_SPOKEN_TOW_CROSSING,
+    MSG_SPOKEN_TOW_COMPLETE
 } msg_spoken_t;
 
 typedef struct {

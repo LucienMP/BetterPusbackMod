@@ -99,6 +99,10 @@ typedef struct {
     double last_force;
     bool_t pause_requested;
     bool_t pause_hold;
+    /* Stopped, or stopping, at a route's hold point until continue_tow. */
+    bool_t hold_point;
+    bool_t hold_point_held;
+    char hold_point_text[96];
     bool_t stop_from_pause_hold;
     bool_t awaiting_plan;
     double tug_weight_force;
@@ -240,6 +244,11 @@ uint64_t bp_route_signature(void);
 bool_t bp_is_inited(void);
 /* The controller's step; PB_STEP_OFF when no operation is running. */
 pushback_step_t bp_current_step(void);
+/* At (or stopping at) a hold point of the route, and why it holds. */
+bool_t bp_hold_point_active(void);
+const char *bp_hold_point_text(void);
+/* Goes on from the hold point; false with the reason when not holding. */
+bool_t bp_continue_from_hold(char *reason, size_t reason_len);
 
 /* Where the current route came from (published as bp/route_source). */
 typedef enum {

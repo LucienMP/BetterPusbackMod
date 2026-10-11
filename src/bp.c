@@ -2436,7 +2436,7 @@ bp_run_push(bool_t hold_requested) {
         return bp_run_push_manual();
     }
 
-    if (hold_requested && bp.pause_hold) {
+    if (hold_requested && (bp.pause_hold || bp.hold_point_held)) {
         /*
          * The route and steering command are intentionally frozen after the
          * stationary hold is reached. Resume re-enters the normal route
@@ -2481,6 +2481,10 @@ bp_run_push(bool_t hold_requested) {
             bp.reverse_t = 0.0;
         }
         corr_pos = corr_acf_pos();
+        /* Remembered before drive_segs, which frees a finished segment. */
+        bool_t seg_holds = seg->hold;
+        char seg_hold_text[sizeof (seg->hold_text)];
+        strlcpy(seg_hold_text, seg->hold_text, sizeof (seg_hold_text));
         if (drive_segs(&corr_pos, &bp.veh, &bp.segs,
                        &bp.last_mis_hdg, bp.d_t, &steer, &speed, &decel)) {
             double nw_defl;
@@ -2516,6 +2520,16 @@ bp_run_push(bool_t hold_requested) {
                 push_at_speed(speed, bp.veh.max_accel, B_TRUE, decel);
             }
             break;
+        }
+        if (seg_holds && list_head(&bp.segs) != NULL) {
+            /* The hold point is reached: stop here until continue_tow. */
+            bp.hold_point = B_TRUE;
+            bp.hold_point_held = B_FALSE;
+            strlcpy(bp.hold_point_text, seg_hold_text,
+                sizeof (bp.hold_point_text));
+            logMsg(BP_INFO_LOG "Hold point reached: %s", bp.hold_point_text);
+            push_at_speed(0, bp.veh.max_decel, B_TRUE, B_TRUE);
+            return (B_TRUE);
         }
         seg = list_head(&bp.segs);
         if (seg != NULL && seg->backward != last_backward) {
@@ -2691,6 +2705,37 @@ pushback_step_t
 bp_current_step(void)
 {
     return (bp_started ? bp.step : PB_STEP_OFF);
+}
+
+bool_t
+bp_hold_point_active(void)
+{
+    return (bp_started && bp.hold_point);
+}
+
+const char *
+bp_hold_point_text(void)
+{
+    return (bp_hold_point_active() ? bp.hold_point_text : "");
+}
+
+bool_t
+bp_continue_from_hold(char *reason, size_t reason_len)
+{
+    char line[160];
+
+    if (!bp_hold_point_active()) {
+        (void)snprintf(reason, reason_len, "the tug is not at a hold point");
+        return (B_FALSE);
+    }
+    (void)snprintf(line, sizeof (line), "Ground, tug continuing, %s cleared.",
+        bp.hold_point_text);
+    bp.hold_point = B_FALSE;
+    bp.hold_point_held = B_FALSE;
+    bp.hold_point_text[0] = '\0';
+    msg_speak(MSG_SPOKEN_TOW_CROSSING, line);
+    logMsg(BP_INFO_LOG "Continuing from the hold point");
+    return (B_TRUE);
 }
 
 /*
@@ -3294,13 +3339,15 @@ pb_step_pushing(void) {
             *tow_session_speed_limit());
     }
 
-    if (bp.pause_requested) {
+    if (bp.pause_requested || bp.hold_point) {
         if (!slave_mode) {
             dr_seti(&drs.override_steer, 1);
             route_active = bp_run_push(B_TRUE);
             if (!route_active) {
                 bp.pause_requested = B_FALSE;
                 bp.pause_hold = B_FALSE;
+                bp.hold_point = B_FALSE;
+                bp.hold_point_held = B_FALSE;
                 bp.step++;
                 bp.step_start_t = bp.cur_t;
                 op_complete = B_TRUE;
@@ -3310,9 +3357,17 @@ pb_step_pushing(void) {
         }
 
         if (ABS(bp.cur_pos.spd) < SPEED_COMPLETE_THRESH) {
-            if (!bp.pause_hold) {
+            if (bp.pause_requested && !bp.pause_hold) {
                 bp.pause_hold = B_TRUE;
                 logMsg(BP_INFO_LOG "Automatic push stationary hold reached");
+            }
+            if (bp.hold_point && !bp.hold_point_held) {
+                char line[160];
+
+                bp.hold_point_held = B_TRUE;
+                (void)snprintf(line, sizeof (line), "Ground, tug holding: %s.",
+                    bp.hold_point_text);
+                msg_speak(MSG_SPOKEN_TOW_HOLDING, line);
             }
         } else {
             bp.pause_hold = B_FALSE;
@@ -3347,6 +3402,13 @@ pb_step_pushing(void) {
             bp.step_start_t = bp.cur_t;
             op_complete = B_TRUE;
             manual_bp_stop();
+            if (tow_session_is_active()) {
+                msg_speak(MSG_SPOKEN_TOW_COMPLETE,
+                    _(bp_ext_msg_text(BP_EXT_MSG_TOW_COMPLETE)));
+            }
+        } else if (bp.hold_point) {
+            /* Reached a hold point this frame: the stop is handled above. */
+            return;
         }
     } else {
         /*
@@ -4787,6 +4849,11 @@ fit_route(const bp_ext_pose_t *poses, int n, list_t *segs, char *reason,
             /* Each position ends a leg, as a click in the planner does. */
             seg = list_tail(segs);
             seg->user_placed = B_TRUE;
+            if (poses[i].kind == BP_EXT_POSE_HOLD) {
+                seg->hold = B_TRUE;
+                strlcpy(seg->hold_text, poses[i].hold_text[0] != '\0' ?
+                    poses[i].hold_text : "hold", sizeof (seg->hold_text));
+            }
             pos = seg->end_pos;
             hdg = seg->end_hdg;
         }
@@ -4900,6 +4967,9 @@ bp_route_export(bp_ext_pose_t *poses, int max)
         poses[n].lon = end.lon;
         poses[n].hdg = normalize_hdg(seg->end_hdg);
         poses[n].backward = (seg->backward != B_FALSE);
+        poses[n].kind = seg->hold ? BP_EXT_POSE_HOLD : BP_EXT_POSE_POSITION;
+        strlcpy(poses[n].hold_text, seg->hold ? seg->hold_text : "",
+            sizeof (poses[n].hold_text));
         n++;
     }
     return (n);

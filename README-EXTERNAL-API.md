@@ -33,7 +33,7 @@ a pilot who uses it on its own.
 
 | Dataref | Type | Meaning |
 | --- | --- | --- |
-| `bp/api_version` | int | Interface version (this document: 9) |
+| `bp/api_version` | int | Interface version (this document: 10) |
 | `bp/state_seq` | int | Changes whenever a value below changes |
 | `bp/started` | int | An operation is running (existing dataref) |
 | `bp/emergency_tow` | int | The running operation is the Emergency Tow |
@@ -138,6 +138,7 @@ plugin can show it, log it or (with a later part of the interface) speak it.
 | `bp/msg_voice` | byte[64] | The voice pack speaking, e.g. `en_GB` or `de`; its language is the part before `_`, `-` or `(` |
 | `bp/msg_duration` | float | Length of the line's recording, seconds |
 | `bp/msg_playing` | int | The line is being spoken now |
+| `bp/msg_channel` | int | Who the line is said to: 0 the ground crew to the cockpit (intercom), 5 the tug driver to Ground on its frequency (version 10, lines 23 to 26) |
 
 A line is published when it starts, even with the simulator's sound off.
 `bp/msg_seq` moves once per line; read the other values when it changes. The
@@ -177,6 +178,10 @@ report how long it speaks).
 | 20 | `start_tow_chocks` | "Removing chocks, and beginning the tow. You may start engines." (instead of 9) |
 | 21 | `start_pb_chocks_nostart` | "Removing chocks, and beginning pushback." (instead of 10) |
 | 22 | `start_tow_chocks_nostart` | "Removing chocks, and beginning the tow." (instead of 11) |
+| 23 | `tow_request` | "Ground, tug ready to tow, requesting the route." (version 10, when a tow is called; channel 5) |
+| 24 | `tow_holding` | "Ground, tug holding: hold short of runway 15/33." (the hold point's text; channel 5) |
+| 25 | `tow_crossing` | "Ground, tug continuing, hold short of runway 15/33 cleared." (on `continue_tow`; channel 5) |
+| 26 | `tow_complete` | "Ground, tug, tow complete." (at the end of a tow; channel 5) |
 
 ## Version 3: blockers
 
@@ -455,6 +460,31 @@ if (XPLMGetDatai(route_seq_dr) != before && XPLMGetDatai(route_status_dr) == 2)
     XPLMGetDatab(route_reason_dr, reason, 0, sizeof (reason) - 1);
 ```
 
+## Version 10: hold points
+
+A tow across a runway or a busy taxiway waits for Ground's or Tower's
+clearance. An `H` line in a route (version 8) is a hold point: the tug
+brings the aircraft to a stop with its reference point on the hold point,
+stays connected and waits until it is told to go on.
+
+| Dataref / command | Type | Meaning |
+| --- | --- | --- |
+| `bp/hold` | int | 1 while stopping or stopped at a hold point |
+| `bp/hold_reason` | byte[128] | The `H` line's text ("hold short of runway 15/33") |
+| `BetterPushback/continue_tow` | command | Go on from the hold point; answered like `load_route` (refused, with the reason, when the tug is not holding) |
+| `bp/tow_state` | int | 3 (`holding`) while a tow is stopped at a hold point |
+
+- The tug slows to a stop at the hold point as it does at the route's end.
+  An `H` as the route's last line is simply its end.
+- The tug driver calls Ground (crew lines 23 to 26 above, on channel 5,
+  `bp/msg_channel`): the request when a tow is called, holding with the hold
+  point's text, continuing when told to go on, complete at the end. They
+  are said through X-Plane's speech, or handed to another plugin's voice as
+  the other lines are (version 4), which can say them on Ground's frequency.
+- Hold points work for any route loaded with `load_route` or `call_tow`.
+  While held, `BetterPushback/stop` ends the operation where it stands, as
+  from a pause.
+
 ## Testing
 
 ### Unit tests
@@ -475,6 +505,9 @@ All run as part of `tests/run_all_tests.sh`:
   external line lasts until it is reported finished, never longer than its
   recording plus the grace, and falls back to the recording when the
   heartbeat stops.
+- `tests/run_ext_api_msgs_tests.sh` also checks the tug driver's tow lines:
+  their fixed numbers and keys, their texts, and that only they are on the
+  ground channel.
 - `tests/run_tow_session_tests.sh` checks the tows' fixed numbers and names,
   the refusals with their reasons, the state following the controller (and
   staying done or failed after a tow), the speed limit, and that tows are not

@@ -33,6 +33,7 @@ typedef struct {
     char voice[BP_EXT_MSG_VOICE_LEN];
     float duration;
     int playing;
+    int channel;            /* bp/msg_channel: 0 intercom, 5 ground */
 } ext_line_t;
 
 static bool_t inited = B_FALSE;
@@ -73,6 +74,7 @@ static dr_t msg_caption_dr;
 static dr_t msg_voice_dr;
 static dr_t msg_duration_dr;
 static dr_t msg_playing_dr;
+static dr_t msg_channel_dr;
 static dr_t voice_mode_dr;
 static dr_t voice_done_seq_dr;
 static dr_t voice_heartbeat_dr;
@@ -105,6 +107,7 @@ refresh_line(void)
         strlcpy(line.voice, "xplane", sizeof (line.voice));
         /* About 15 characters a second; X-Plane does not say how long. */
         line.duration = (float)strlen(state.spoken_text) / 15.0f;
+        line.channel = bp_ext_msg_channel(line.msg);
         return;
     }
     line.msg = bp_ext_msg_public(state.message);
@@ -115,6 +118,7 @@ refresh_line(void)
         sizeof (line.caption));
     strlcpy(line.voice, msg_voice_pack(), sizeof (line.voice));
     line.duration = mgs_initiated() ? (float)msg_dur(state.message) : 0.0f;
+    line.channel = bp_ext_msg_channel(line.msg);
 }
 
 static int
@@ -245,6 +249,7 @@ ext_api_init(void)
     dr_create_f(&msg_duration_dr, &line.duration, B_FALSE,
         "bp/msg_duration");
     dr_create_i(&msg_playing_dr, &line.playing, B_FALSE, "bp/msg_playing");
+    dr_create_i(&msg_channel_dr, &line.channel, B_FALSE, "bp/msg_channel");
 
     dr_create_i(&voice_mode_dr, &msg_ext_voice_mode, B_TRUE,
         "bp/voice_mode");
