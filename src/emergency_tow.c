@@ -1,4 +1,5 @@
 #include "emergency_tow.h"
+#include "tow_session.h"
 
 typedef struct {
     bool active;
@@ -47,14 +48,16 @@ emergency_tow_finish(void)
     return was_active;
 }
 
+/* Neither an Emergency Tow nor another plugin's tow (tow_session.h) saves
+ * its route or shows the wing walker. */
 bool
 emergency_tow_allows_persistent_routes(void)
 {
-    return !state.active;
+    return !state.active && tow_session_allows_persistent_routes();
 }
 
 bool
 emergency_tow_allows_wing_walker(void)
 {
-    return !state.active;
+    return !state.active && tow_session_allows_wing_walker();
 }

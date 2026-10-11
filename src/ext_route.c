@@ -5,7 +5,8 @@
  * in bp/route_status and bp/route_reason. The current route is published in
  * the same text form in bp/route_current. The stand's two saved-route slots
  * are saved and loaded with BetterPushback/save_route_slot and
- * load_route_slot.
+ * load_route_slot. BetterPushback/call_tow loads bp/route_in and calls the
+ * tug for a tow of the kind in bp/tow_kind (version 9, tow_session.h).
  */
 
 #include <string.h>
@@ -20,6 +21,7 @@
 #include "bp_cam.h"
 #include "ext_api.h"
 #include "ext_api_route.h"
+#include "tow_session.h"
 #include "xplane.h"
 
 #define STAND_REFRESH_TICKS 50     /* ext_route_refresh runs ~10 times a second */
@@ -61,6 +63,13 @@ static dr_t route_slot_dr, route_stand_dr, route_slot1_dr, route_slot2_dr;
 static dr_t onground_dr, groundspeed_dr;
 static XPLMCommandRef save_slot_cmd = NULL, load_slot_cmd = NULL;
 
+/* Tows (version 9). */
+static int tow_kind = TOW_KIND_REPOSITION;  /* written by the other plugin */
+static int tow_state = TOW_STATE_IDLE;
+static char tow_state_name_buf[16] = "idle";
+static dr_t tow_kind_dr, tow_state_dr, tow_state_name_dr, tow_speed_limit_dr;
+static XPLMCommandRef call_tow_cmd = NULL;
+
 static void
 answer(bool_t accepted, const char *reason)
 {
@@ -98,6 +107,34 @@ load_route_cb(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
         return (1);
     }
     if (!bp_route_load_external(poses, n, reason, sizeof (reason))) {
+        answer(B_FALSE, reason);
+        return (1);
+    }
+    ext_route_refresh();
+    answer(B_TRUE, "");
+    return (1);
+}
+
+/* BetterPushback/call_tow: the route in bp/route_in, the kind in bp/tow_kind. */
+static int
+call_tow_cb(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
+{
+    bp_ext_pose_t poses[BP_EXT_ROUTE_MAX_POSES];
+    char reason[BP_EXT_ROUTE_REASON_LEN] = "";
+    int n;
+
+    (void)cmd;
+    (void)refcon;
+    if (phase != xplm_CommandBegin)
+        return (1);
+    route_in[sizeof (route_in) - 1] = '\0';
+    n = bp_ext_route_parse(route_in, poses, BP_EXT_ROUTE_MAX_POSES, reason,
+        sizeof (reason));
+    if (n < 0) {
+        answer(B_FALSE, reason);
+        return (1);
+    }
+    if (!bp_tow_call(tow_kind, poses, n, reason, sizeof (reason))) {
         answer(B_FALSE, reason);
         return (1);
     }
@@ -224,6 +261,10 @@ ext_route_refresh(void)
         }
     }
 
+    tow_state = (int)tow_session_state((int)bp_current_step(), B_FALSE);
+    (void)snprintf(tow_state_name_buf, sizeof (tow_state_name_buf), "%s",
+        tow_state_name(tow_state));
+
     route_source = (int)bp_route_source();
     (void)snprintf(route_source_name, sizeof (route_source_name), "%s",
         route_source >= 0 && route_source <
@@ -293,6 +334,20 @@ ext_route_init(void)
         _("Load the stand's saved pushback route from bp/route_slot"));
     XPLMRegisterCommandHandler(save_slot_cmd, slot_cb, 1, (void *)1);
     XPLMRegisterCommandHandler(load_slot_cmd, slot_cb, 1, NULL);
+
+    tow_kind = TOW_KIND_REPOSITION;
+    tow_session_reset();
+    tow_state = TOW_STATE_IDLE;
+    (void)snprintf(tow_state_name_buf, sizeof (tow_state_name_buf), "idle");
+    dr_create_i(&tow_kind_dr, &tow_kind, B_TRUE, "bp/tow_kind");
+    dr_create_i(&tow_state_dr, &tow_state, B_FALSE, "bp/tow_state");
+    dr_create_b(&tow_state_name_dr, tow_state_name_buf,
+        sizeof (tow_state_name_buf), B_FALSE, "bp/tow_state_name");
+    dr_create_f(&tow_speed_limit_dr, tow_session_speed_limit(), B_TRUE,
+        "bp/tow_speed_limit");
+    call_tow_cmd = XPLMCreateCommand("BetterPushback/call_tow",
+        _("Call the tug to tow along the route another plugin wrote"));
+    XPLMRegisterCommandHandler(call_tow_cmd, call_tow_cb, 1, NULL);
     inited = B_TRUE;
 }
 
@@ -306,6 +361,11 @@ ext_route_fini(void)
     XPLMUnregisterCommandHandler(clear_cmd, clear_route_cb, 1, NULL);
     XPLMUnregisterCommandHandler(save_slot_cmd, slot_cb, 1, (void *)1);
     XPLMUnregisterCommandHandler(load_slot_cmd, slot_cb, 1, NULL);
+    XPLMUnregisterCommandHandler(call_tow_cmd, call_tow_cb, 1, NULL);
+    dr_delete(&tow_kind_dr);
+    dr_delete(&tow_state_dr);
+    dr_delete(&tow_state_name_dr);
+    dr_delete(&tow_speed_limit_dr);
     dr_delete(&route_slot_dr);
     dr_delete(&route_stand_dr);
     dr_delete(&route_slot1_dr);

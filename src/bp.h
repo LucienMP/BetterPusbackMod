@@ -238,6 +238,8 @@ int bp_route_export(bp_ext_pose_t *poses, int max);
 uint64_t bp_route_signature(void);
 /* bp_init() has succeeded for the loaded aircraft (never tries it). */
 bool_t bp_is_inited(void);
+/* The controller's step; PB_STEP_OFF when no operation is running. */
+pushback_step_t bp_current_step(void);
 
 /* Where the current route came from (published as bp/route_source). */
 typedef enum {

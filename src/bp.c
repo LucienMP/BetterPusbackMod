@@ -60,6 +60,7 @@
 #include "bp_cam.h"
 #include "cfg.h"
 #include "emergency_tow.h"
+#include "tow_session.h"
 #include "ext_api_msgs.h"
 #include "ground_ops_ui.h"
 #include "msg.h"
@@ -79,6 +80,10 @@
 #define    NORMAL_DECEL        0.17    /* m/s^2 */
 #define    BRAKE_PEDAL_THRESH    0.03    /* brake pedal angle, 0..1 */
 #define    FORCE_PER_TON        5000    /* max push force per ton, Newtons */
+
+/* The tug's own forward and reverse speeds (m/s), kept for a tow's limit. */
+static double tug_max_fwd_spd = MAX_FWD_SPEED;
+static double tug_max_rev_spd = MAX_REV_SPEED;
 #define    TELEMETRY_SAMPLE_HZ    10
 /*
  * X-Plane 10's tire model is a bit less forgiving of slow creeping,
@@ -2634,6 +2639,8 @@ bp_complete(void) {
     bool_t emergency_session = emergency_tow_is_active();
     bool_t emergency_completed = emergency_session &&
         bp.step == PB_STEP_DRIVING_AWAY;
+    bool_t tow_session = tow_session_is_active();
+    bool_t tow_completed = tow_session && bp.step == PB_STEP_DRIVING_AWAY;
 
     telemetry_stop();
     /*
@@ -2676,6 +2683,14 @@ bp_complete(void) {
     bp_state_init();
     if (emergency_session)
         bp_emergency_tow_session_end_notify(emergency_completed);
+    if (tow_session)
+        bp_tow_session_end_notify(tow_completed);
+}
+
+pushback_step_t
+bp_current_step(void)
+{
+    return (bp_started ? bp.step : PB_STEP_OFF);
 }
 
 /*
@@ -2761,6 +2776,9 @@ pb_step_tug_load(void) {
         bp_ls.tug->info->max_tow_fwd_speed);
     bp.veh.max_rev_spd = MIN(bp.veh.max_rev_spd,
         bp_ls.tug->info->max_tow_rev_speed);
+    /* The tug's own speeds, before another plugin's tow speed limit. */
+    tug_max_fwd_spd = bp.veh.max_fwd_spd;
+    tug_max_rev_spd = bp.veh.max_rev_spd;
     bool_t display_marshaller = B_TRUE;
     (void)conf_get_b(bp_conf, "display_marshaller", &display_marshaller);
     if (wing_walker_should_allocate(display_marshaller != B_FALSE,
@@ -3267,6 +3285,14 @@ pb_step_waiting_for_doors(void) {
 static void
 pb_step_pushing(void) {
     bool_t route_active;
+
+    /* A tow's speed limit (bp/tow_speed_limit) may change at any time. */
+    if (tow_session_is_active()) {
+        bp.veh.max_fwd_spd = tow_session_speed_cap(tug_max_fwd_spd,
+            *tow_session_speed_limit());
+        bp.veh.max_rev_spd = tow_session_speed_cap(tug_max_rev_spd,
+            *tow_session_speed_limit());
+    }
 
     if (bp.pause_requested) {
         if (!slave_mode) {

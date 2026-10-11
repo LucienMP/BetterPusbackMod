@@ -2914,7 +2914,7 @@ bp_cam_route_slot_save(unsigned slot, char *reason, size_t reason_len)
     }
     if (!emergency_tow_allows_persistent_routes()) {
         (void)snprintf(reason, reason_len,
-            "routes are not saved during an Emergency Tow");
+            "routes are not saved during a tow");
         return (B_FALSE);
     }
     if (slave_mode) {
@@ -2952,7 +2952,7 @@ bp_cam_route_slot_load(unsigned slot, char *reason, size_t reason_len)
     }
     if (!emergency_tow_allows_persistent_routes()) {
         (void)snprintf(reason, reason_len,
-            "saved routes are not used during an Emergency Tow");
+            "saved routes are not used during a tow");
         return (B_FALSE);
     }
     refused = bp_route_change_refused();

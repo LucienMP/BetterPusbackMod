@@ -33,7 +33,7 @@ a pilot who uses it on its own.
 
 | Dataref | Type | Meaning |
 | --- | --- | --- |
-| `bp/api_version` | int | Interface version (this document: 8) |
+| `bp/api_version` | int | Interface version (this document: 9) |
 | `bp/state_seq` | int | Changes whenever a value below changes |
 | `bp/started` | int | An operation is running (existing dataref) |
 | `bp/emergency_tow` | int | The running operation is the Emergency Tow |
@@ -407,6 +407,54 @@ P 47.79398700 13.00676300 340.8
   a hold point, else `BPROUTE 1` as before. Waypoints are written as `P` lines
   with the heading they were given.
 
+## Version 9: tows
+
+A ground-handling or ATC plugin can have the tug tow the aircraft along a
+route it supplies: to a hangar, a remote stand, the isolated position, back
+to the stand. Unlike Emergency Tow, a tow can be called whenever the aircraft
+is stopped on the ground with its gear down, not only after a push, and not
+only at a stand.
+
+| Dataref / command | Type | Meaning |
+| --- | --- | --- |
+| `bp/tow_kind` | int, writable | The kind of the next tow, see below (default 2) |
+| `BetterPushback/call_tow` | command | Load `bp/route_in` and call the tug for a tow of that kind; answered like `load_route` (`bp/route_seq`, `bp/route_status`, `bp/route_reason`) |
+| `bp/tow_state` | int | 0 idle, 1 connecting (the tug drives up and connects), 2 towing (moving, then stopping and disconnecting at the end), 3 holding (version 10), 4 done (the tug drove away), 5 failed (ended early) |
+| `bp/tow_state_name` | byte[16] | `idle`, `connecting`, `towing`, `holding`, `done` or `failed` |
+| `bp/tow_speed_limit` | float, writable | m/s: the tow goes no faster (0: the tug's own speeds). Read while towing, so it may change during the tow |
+
+| `bp/tow_kind` | Name | |
+| --- | --- | --- |
+| 1 | `return_to_stand` | back onto a stand |
+| 2 | `reposition` | to another place on the apron |
+| 3 | `hangar` | into or out of a hangar |
+| 4 | `isolated_position` | to the airport's isolated parking position |
+| 5 | `remote_stand` | to a remote stand |
+| 6 | `runup_area` | to the engine run-up area |
+| 7 | `recovery` | a disabled aircraft (version 11 adds its rules) |
+
+- The route is fitted from where the aircraft stands, as `load_route` does: a
+  position behind it is reached by pushing, one ahead by towing. A route that
+  does not fit is refused with the reason, and nothing starts.
+- The tow then runs as a push does: the tug drives up and connects, the pilot
+  releases the parking brake, the tug tows along the route, stops at the end,
+  disconnects and drives away. `BetterPushback/stop` ends it at any time.
+- `call_tow` is refused, with the reason, while another push or tow runs, in
+  shared-cockpit slave mode, with the preferences open, and when the kind is
+  not 1 to 7. A tow route is never saved as a stand's route, and the wing
+  walker stays away, as for Emergency Tow.
+- `bp/tow_state` stays `done` or `failed` after a tow until the next one.
+
+```c
+XPLMSetDatab(route_in_dr, (void *)route_text, 0, (int)strlen(route_text) + 1);
+XPLMSetDatai(tow_kind_dr, 3);           /* hangar */
+XPLMSetDataf(tow_speed_limit_dr, 2.0f); /* walking pace inside the hangar */
+int before = XPLMGetDatai(route_seq_dr);
+XPLMCommandOnce(XPLMFindCommand("BetterPushback/call_tow"));
+if (XPLMGetDatai(route_seq_dr) != before && XPLMGetDatai(route_status_dr) == 2)
+    XPLMGetDatab(route_reason_dr, reason, 0, sizeof (reason) - 1);
+```
+
 ## Testing
 
 ### Unit tests
@@ -427,6 +475,10 @@ All run as part of `tests/run_all_tests.sh`:
   external line lasts until it is reported finished, never longer than its
   recording plus the grace, and falls back to the recording when the
   heartbeat stops.
+- `tests/run_tow_session_tests.sh` checks the tows' fixed numbers and names,
+  the refusals with their reasons, the state following the controller (and
+  staying done or failed after a tow), the speed limit, and that tows are not
+  saved and have no wing walker.
 - `tests/run_ext_api_route_tests.sh` checks reading and writing route text:
   comments, line endings, every kind of bad input refused with a reason that
   names the line, the position limit (64), waypoints facing the next position,

@@ -45,6 +45,7 @@
 #include "cab_view.h"
 #include "cfg.h"
 #include "emergency_tow.h"
+#include "tow_session.h"
 #include "ext_api.h"
 #include "ff_a320_intf.h"
 #include "ground_ops_ui.h"
@@ -966,6 +967,72 @@ bp_emergency_tow_planner_notify(void)
     enable_menu_items();
     logMsg(BP_INFO_LOG "Emergency Tow tug connected; opened the one-time "
         "manual planner automatically");
+}
+
+/*
+ * Another plugin's tow (README-EXTERNAL-API.md, version 9): the route loaded,
+ * then the tug called as the plan-first flow does. False with the reason when
+ * it cannot start; nothing is left changed then.
+ */
+bool_t
+bp_tow_call(int kind, const bp_ext_pose_t *poses, int n, char *reason,
+    size_t reason_len)
+{
+    const char *refused;
+
+    if (!bp_init()) {
+        (void)snprintf(reason, reason_len,
+            "BetterPushback cannot work with this aircraft");
+        return (B_FALSE);
+    }
+    refused = tow_session_refused(kind, bp_started, slave_mode,
+        emergency_tow_is_active());
+    if (refused != NULL) {
+        (void)snprintf(reason, reason_len, "%s", refused);
+        return (B_FALSE);
+    }
+    if (get_pref_widget_status()) {
+        (void)snprintf(reason, reason_len, "the preferences window is open");
+        return (B_FALSE);
+    }
+    (void)bp_cam_stop();
+    if (!bp_route_load_external(poses, n, reason, reason_len))
+        return (B_FALSE);
+    if (!tow_session_begin(kind)) {
+        (void)snprintf(reason, reason_len, "a tow is already under way");
+        bp_delete_all_segs();
+        return (B_FALSE);
+    }
+    op_complete = B_FALSE;
+    late_plan_requested = B_FALSE;
+    if (!bp_start()) {
+        tow_session_finish(B_FALSE);
+        bp_delete_all_segs();
+        (void)snprintf(reason, reason_len, "the tug cannot come: the aircraft "
+            "must be stopped on the ground with its gear down");
+        return (B_FALSE);
+    }
+    prefs_enable = B_FALSE;
+    start_pb_plan_enable = B_FALSE;
+    stop_pb_plan_enable = B_FALSE;
+    start_pb_enable = B_FALSE;
+    conn_first_enable = B_FALSE;
+    stop_pb_enable = !slave_mode;
+    enable_menu_items();
+    logMsg(BP_INFO_LOG "Tow (%s) called by another plugin with %d positions",
+        tow_kind_name(kind), n);
+    return (B_TRUE);
+}
+
+void
+bp_tow_session_end_notify(bool_t completed)
+{
+    tow_session_finish(completed);
+    plan_complete = B_FALSE;
+    planner_open = B_FALSE;
+    op_complete = B_TRUE;
+    logMsg(BP_INFO_LOG "Tow %s", completed ? "complete" : "ended before the "
+        "tug drove away");
 }
 
 void
