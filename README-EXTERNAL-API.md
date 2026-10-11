@@ -33,7 +33,7 @@ a pilot who uses it on its own.
 
 | Dataref | Type | Meaning |
 | --- | --- | --- |
-| `bp/api_version` | int | Interface version (this document: 14) |
+| `bp/api_version` | int | Interface version (this document: 15) |
 | `bp/state_seq` | int | Changes whenever a value below changes |
 | `bp/started` | int | An operation is running (existing dataref) |
 | `bp/emergency_tow` | int | The running operation is the Emergency Tow |
@@ -298,8 +298,8 @@ P 47.79240000 12.99690000 270.0
 | `bp/route_status` | int | Answer to the last load, check or clear: 1 accepted (fits), 2 rejected (0 before any) |
 | `bp/route_reason` | byte[128] | Why it was rejected, e.g. "position 2 cannot be reached from the one before it within this aircraft's turning limits" |
 | `bp/route_current` | byte[4096] | The current route, in the same text form (empty when there is none) |
-| `bp/route_source` | int | Where the current route came from: 0 none, 1 planner (drawn, changed or accepted there), 2 saved slot (taken unchanged), 3 external (`load_route`) |
-| `bp/route_source_name` | byte[16] | `none`, `planner`, `saved` or `external` |
+| `bp/route_source` | int | Where the current route came from: 0 none, 1 planner (drawn, changed or accepted there), 2 saved slot (taken unchanged), 3 external (`load_route`), 4 scenery (the scenery's WED route, version 15) |
+| `bp/route_source_name` | byte[16] | `none`, `planner`, `saved`, `external` or `scenery` |
 
 When a route is accepted:
 
@@ -601,6 +601,33 @@ W 47.26044 11.34650
 | --- | --- |
 | `BetterPushback/preposition` | Bring the tug to the aircraft to wait, not connected: it drives up as for `connect_first`, stops at the nose (`bp/tug_state` 3, `bp/prepositioned` 1) and waits, before the doors are checked. `BetterPushback/connect_first` then calls it in to connect, and the operation goes on as after `connect_first`; `BetterPushback/stop` sends it away. Answered like `load_route`; refused, with the reason, when an operation is already under way or the tug cannot come |
 
+## Version 15: the scenery's push-back routes
+
+A scenery author can draw push-back routes in WorldEditor (string placements
+with the `pushback` or `pushback_tug` resource). `BetterPushback/recreate_scenery_routes`
+has always converted each scenery's `earth.wed.xml` into
+`BetterPushback_routes.dat` beside it, but nothing used the result since the
+saved slots came. They are now a third source beside the two slots.
+
+| Dataref / command | Type | Meaning |
+| --- | --- | --- |
+| `bp/scenery_route_count` | int | How many scenery routes start where the aircraft stands (within 20 m, its heading within 30 degrees); -1 until BetterPushback is initialised (reading it has it initialised, as `bp/route_slot1` does) |
+| `bp/scenery_route_index` | int, writable | Which of them the command loads: 1 is the nearest |
+| `BetterPushback/load_scenery_route` | command | Make that scenery route the current route; answered like `load_route` |
+
+- The route is fitted to the aircraft as a route from `load_route` is: through
+  the end of each WED node, from where the aircraft stands, within its
+  turning limits, or refused with the reason. A loaded route has
+  `bp/route_source` = 4 (`scenery`).
+- It can be loaded when a route can be (see version 5), not during a tow.
+- The count is refreshed with the slots, every few seconds while the route
+  may change, and right after the command.
+- The conversion still runs only on `recreate_scenery_routes`, which now
+  converts every project again (files converted before marked no nodes; their
+  routes are fitted through each change of direction instead). Distributed
+  sceneries rarely include their `earth.wed.xml`, so this mostly serves
+  sceneries made or edited locally.
+
 ## Testing
 
 ### Unit tests
@@ -628,6 +655,10 @@ All run as part of `tests/run_all_tests.sh`:
   default, that an external blocker holds the connection and the start with
   the other plugin's words (a text it did not terminate is cut), and that
   chocks and walkers left to the other plugin behave as described.
+- `tests/run_scenery_route_tests.sh` checks that a converted route file is
+  read and a broken route in it left out, that only routes starting at the
+  aircraft are offered, nearest first, and that the route passes the end of
+  each WED node (or each change of direction in an older file).
 - `tests/run_ext_api_tugpath_tests.sh` checks that a path is read, that an
   empty one is no path and no complaint, that each mistake is named with its
   line, that a path far from the aircraft is refused, and the road's length

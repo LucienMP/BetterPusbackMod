@@ -286,10 +286,18 @@ typedef enum {
     BP_ROUTE_SOURCE_NONE,           /* there is no route */
     BP_ROUTE_SOURCE_PLANNER,        /* drawn, changed or accepted in the planner */
     BP_ROUTE_SOURCE_SAVED,          /* a saved slot, taken unchanged */
-    BP_ROUTE_SOURCE_EXTERNAL        /* loaded by another plugin */
+    BP_ROUTE_SOURCE_EXTERNAL,       /* loaded by another plugin */
+    BP_ROUTE_SOURCE_SCENERY         /* the scenery's WED route (version 15) */
 } bp_route_source_t;
 
 void bp_route_set_source(bp_route_source_t source);
+/*
+ * Version 15: the scenery's WED push-back routes that start where the aircraft
+ * stands. The count is -1 before BetterPushback is initialised; loading takes
+ * the `index`th (1, nearest first).
+ */
+int bp_scenery_route_count(void);
+bool_t bp_route_load_scenery(int index, char *reason, size_t reason_len);
 bp_route_source_t bp_route_source(void);
 
 bool_t acf_is_airliner(void);

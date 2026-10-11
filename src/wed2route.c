@@ -35,6 +35,7 @@
 #include <acfutils/stat.h>
 
 #include "driving.h"
+#include "scenery_route.h"
 #include "wed2route.h"
 #include "xplane.h"
 
@@ -289,6 +290,13 @@ cons_route(const xmlNode *node, const avl_tree_t *objmap, avl_tree_t *route_tbl)
                        "%s: route too erratic", route_name);
                 goto out;
             }
+            /*
+             * Each WED node ends a leg, as a click in the planner does;
+             * read back by scenery_route.c to refit the route to the
+             * aircraft that uses it.
+             */
+            seg = list_tail(&segs);
+            seg->user_placed = B_TRUE;
         }
     }
 
@@ -447,8 +455,113 @@ wed2dat(const char *earthwedxml, const char *route_table_filename) {
     return (B_FALSE);
 }
 
+/* The converted route files found in Custom Scenery, listed once. */
+static char **route_files = NULL;
+static int n_route_files = 0;
+static bool_t route_files_listed = B_FALSE;
+
+static void
+route_files_forget(void)
+{
+    for (int i = 0; i < n_route_files; i++)
+        free(route_files[i]);
+    free(route_files);
+    route_files = NULL;
+    n_route_files = 0;
+    route_files_listed = B_FALSE;
+}
+
+static void
+route_files_list(void)
+{
+    char *path = mkpathname(bp_xpdir, "Custom Scenery", NULL);
+    DIR *d = opendir(path);
+    struct dirent *de;
+
+    free(path);
+    route_files_listed = B_TRUE;
+    if (d == NULL)
+        return;
+    while ((de = readdir(d)) != NULL) {
+        char *file;
+
+        if (de->d_name[0] == '.')
+            continue;
+        file = mkpathname(bp_xpdir, "Custom Scenery", de->d_name,
+            "BetterPushback_routes.dat", NULL);
+        if (file_exists(file, NULL)) {
+            route_files = realloc(route_files,
+                (n_route_files + 1) * sizeof (*route_files));
+            VERIFY(route_files != NULL);
+            route_files[n_route_files++] = file;
+        } else {
+            free(file);
+        }
+    }
+    closedir(d);
+    /* New files are found on the next look. */
+    route_files_forget();
+}
+
+/* A route file's text; NULL when it cannot be read or is far too big. */
+static char *
+read_text(const char *file)
+{
+    FILE *fp = fopen(file, "rb");
+    long len;
+    char *text;
+
+    if (fp == NULL)
+        return (NULL);
+    if (fseek(fp, 0, SEEK_END) != 0 || (len = ftell(fp)) < 0 ||
+        len > 8 * 1024 * 1024 || fseek(fp, 0, SEEK_SET) != 0) {
+        fclose(fp);
+        return (NULL);
+    }
+    text = safe_malloc((size_t)len + 1);
+    if (fread(text, 1, (size_t)len, fp) != (size_t)len) {
+        fclose(fp);
+        free(text);
+        return (NULL);
+    }
+    text[len] = '\0';
+    fclose(fp);
+    return (text);
+}
+
+int
+scenery_routes_near(double lat, double lon, double hdg,
+    bp_scenery_route_t *out, int max)
+{
+    enum { PER_FILE = 256 };
+    bp_scenery_route_t *routes;
+    int n = 0;
+
+    if (!route_files_listed)
+        route_files_list();
+    if (n_route_files == 0 || max <= 0)
+        return (0);
+    routes = safe_calloc(PER_FILE, sizeof (*routes));
+    for (int f = 0; f < n_route_files && n < max; f++) {
+        char *text = read_text(route_files[f]);
+        int count;
+
+        if (text == NULL)
+            continue;
+        count = bp_scenery_routes_parse(text, routes, PER_FILE);
+        free(text);
+        for (int i = 0; i < count && n < max; i++) {
+            if (bp_scenery_route_matches(&routes[i], lat, lon, hdg))
+                out[n++] = routes[i];
+        }
+    }
+    free(routes);
+    bp_scenery_routes_sort(out, n);
+    return (n);
+}
+
 void
-xlate_wedroutes(void) {
+xlate_wedroutes(bool_t force) {
     char *path = mkpathname(bp_xpdir, "Custom Scenery", NULL);
     DIR *d = opendir(path);
     struct dirent *de;
@@ -483,7 +596,8 @@ xlate_wedroutes(void) {
                    routefile, strerror(errno));
             goto done;
         }
-        if ((!exists || earthwed_st.st_mtime > routefile_st.st_mtime) &&
+        if ((force || !exists ||
+            earthwed_st.st_mtime > routefile_st.st_mtime) &&
             !wed2dat(earthwed, routefile)) {
             logMsg(BP_ERROR_LOG "Error translating %s to %s",
                    earthwed, routefile);

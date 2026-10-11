@@ -45,7 +45,7 @@ static uint64_t current_signature = 0;
 
 /* Indexed by bp_route_source_t (published numbers: never change). */
 static const char *const source_names[] = {
-    "none", "planner", "saved", "external"
+    "none", "planner", "saved", "external", "scenery"
 };
 
 static dr_t route_in_dr, route_current_dr, route_reason_dr;
@@ -53,6 +53,10 @@ static dr_t route_seq_dr, route_status_dr;
 static dr_t route_source_dr, route_source_name_dr;
 static XPLMCommandRef load_cmd = NULL, check_cmd = NULL, clear_cmd = NULL;
 static XPLMCommandRef preposition_cmd = NULL;
+/* Version 15: the scenery's WED routes at the stand. */
+static int scenery_index = 1, scenery_count = -1;
+static dr_t scenery_index_dr, scenery_count_dr;
+static XPLMCommandRef load_scenery_cmd = NULL;
 
 /* Saved routes (version 6). */
 static int route_slot = 1;                 /* written by the other plugin */
@@ -169,6 +173,26 @@ continue_tow_cb(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
     return (1);
 }
 
+static void refresh_stand(void);
+
+/* BetterPushback/load_scenery_route: the scenery's WED route (version 15). */
+static int
+load_scenery_cb(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
+{
+    char reason[BP_EXT_ROUTE_REASON_LEN] = "";
+    bool_t ok;
+
+    (void)cmd;
+    (void)refcon;
+    if (phase != xplm_CommandBegin)
+        return (1);
+    ok = bp_route_load_scenery(scenery_index, reason, sizeof (reason));
+    refresh_stand();
+    ext_route_refresh();
+    answer(ok, ok ? "" : reason);
+    return (1);
+}
+
 /* BetterPushback/preposition: the tug comes and waits at the nose. */
 static int
 preposition_cb(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon)
@@ -240,6 +264,7 @@ refresh_stand(void)
     bool_t saved[2];
 
     stand_ticks = 0;
+    scenery_count = bp_scenery_route_count();
     if (!bp_cam_stand_routes(route_stand, sizeof (route_stand), saved,
         reason, sizeof (reason))) {
         clear_stand();
@@ -316,11 +341,13 @@ ext_route_refresh(void)
     if (++stand_ticks >= STAND_REFRESH_TICKS) {
         if (!bp_is_inited() && !(stand_wanted && acf_idle_on_ground())) {
             clear_stand();
+            scenery_count = -1;
             stand_ticks = 0;
         } else if (bp_route_change_refused() == NULL) {
             refresh_stand();
         } else if (!bp_is_inited()) {
             clear_stand();          /* it cannot initialise here */
+            scenery_count = -1;
             stand_ticks = -STAND_RETRY_TICKS;
         }
     }
@@ -428,6 +455,15 @@ ext_route_init(void)
     emergency_stop_cmd = XPLMCreateCommand("BetterPushback/emergency_stop",
         _("Stop the push or tow at once, the tug kept connected"));
     XPLMRegisterCommandHandler(emergency_stop_cmd, emergency_stop_cb, 1, NULL);
+    scenery_index = 1;
+    scenery_count = -1;
+    dr_create_i(&scenery_index_dr, &scenery_index, B_TRUE,
+        "bp/scenery_route_index");
+    dr_create_i_cfg(&scenery_count_dr, &scenery_count,
+        (dr_cfg_t){ .read_cb = stand_read_cb }, "bp/scenery_route_count");
+    load_scenery_cmd = XPLMCreateCommand("BetterPushback/load_scenery_route",
+        _("Load the scenery's push-back route in bp/scenery_route_index"));
+    XPLMRegisterCommandHandler(load_scenery_cmd, load_scenery_cb, 1, NULL);
     preposition_cmd = XPLMCreateCommand("BetterPushback/preposition",
         _("Bring the tug to the aircraft to wait, not yet connected"));
     XPLMRegisterCommandHandler(preposition_cmd, preposition_cb, 1, NULL);
@@ -448,6 +484,9 @@ ext_route_fini(void)
     XPLMUnregisterCommandHandler(continue_tow_cmd, continue_tow_cb, 1, NULL);
     XPLMUnregisterCommandHandler(emergency_stop_cmd, emergency_stop_cb, 1, NULL);
     XPLMUnregisterCommandHandler(preposition_cmd, preposition_cb, 1, NULL);
+    XPLMUnregisterCommandHandler(load_scenery_cmd, load_scenery_cb, 1, NULL);
+    dr_delete(&scenery_index_dr);
+    dr_delete(&scenery_count_dr);
     dr_delete(&hold_dr);
     dr_delete(&hold_reason_dr);
     dr_delete(&tow_kind_dr);

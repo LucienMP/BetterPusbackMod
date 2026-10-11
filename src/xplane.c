@@ -860,7 +860,7 @@ recreate_routes_handler(XPLMCommandRef cmd, XPLMCommandPhase phase, void *refcon
     UNUSED(refcon);
     if (phase != xplm_CommandEnd)
         return (0);
-    xlate_wedroutes();
+    xlate_wedroutes(B_TRUE);
     return (1);
 }
 

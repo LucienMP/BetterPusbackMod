@@ -64,6 +64,8 @@
 #include "ext_api_handoff.h"
 #include "ext_api_tugpath.h"
 #include "ext_tug.h"
+#include "scenery_route.h"
+#include "wed2route.h"
 #include "ext_api_state.h"
 #include "ext_api_msgs.h"
 #include "ground_ops_ui.h"
@@ -5284,6 +5286,82 @@ bp_route_load_external(const bp_ext_pose_t *poses, int n, char *reason,
     bp_route_set_source(BP_ROUTE_SOURCE_EXTERNAL);
     logMsg(BP_INFO_LOG "External route loaded: %d position(s), %u "
         "segment(s)", n, (unsigned)list_count(&bp.segs));
+    return (B_TRUE);
+}
+
+/* Up to this many scenery routes are offered at a stand. */
+#define SCENERY_ROUTES_MAX 8
+
+/* Where the aircraft stands, for the scenery routes. */
+static int
+scenery_routes_here(bp_scenery_route_t *routes, int max)
+{
+    double lat, lon, alt;
+
+    XPLMLocalToWorld(dr_getf(&drs.local_x), dr_getf(&drs.local_y),
+        dr_getf(&drs.local_z), &lat, &lon, &alt);
+    return (scenery_routes_near(lat, lon, normalize_hdg(dr_getf(&drs.hdg)),
+        routes, max));
+}
+
+int
+bp_scenery_route_count(void)
+{
+    bp_scenery_route_t *routes;
+    int n;
+
+    if (!inited)
+        return (-1);
+    routes = safe_calloc(SCENERY_ROUTES_MAX, sizeof (*routes));
+    n = scenery_routes_here(routes, SCENERY_ROUTES_MAX);
+    free(routes);
+    return (n);
+}
+
+bool_t
+bp_route_load_scenery(int index, char *reason, size_t reason_len)
+{
+    bp_scenery_route_t *routes;
+    bp_ext_pose_t poses[BP_EXT_ROUTE_MAX_POSES];
+    const char *refused;
+    list_t segs;
+    int n, np = 0;
+
+    if (!bp_init()) {
+        (void)snprintf(reason, reason_len,
+            "BetterPushback cannot work with this aircraft");
+        return (B_FALSE);
+    }
+    if ((refused = bp_route_change_refused()) != NULL) {
+        (void)snprintf(reason, reason_len, "%s", refused);
+        return (B_FALSE);
+    }
+    if (!emergency_tow_allows_persistent_routes()) {
+        (void)snprintf(reason, reason_len,
+            "scenery routes are not used during a tow");
+        return (B_FALSE);
+    }
+    routes = safe_calloc(SCENERY_ROUTES_MAX, sizeof (*routes));
+    n = scenery_routes_here(routes, SCENERY_ROUTES_MAX);
+    if (n == 0) {
+        (void)snprintf(reason, reason_len, "no scenery route starts where "
+            "the aircraft stands");
+    } else if (index < 1 || index > n) {
+        (void)snprintf(reason, reason_len, "bp/scenery_route_index must be "
+            "1 to %d here", n);
+    } else {
+        np = bp_scenery_route_poses(&routes[index - 1], poses,
+            BP_EXT_ROUTE_MAX_POSES);
+    }
+    free(routes);
+    if (np == 0)
+        return (B_FALSE);
+    if (!fit_route(poses, np, &segs, reason, reason_len))
+        return (B_FALSE);
+    bp_route_replace(&segs);
+    bp_route_set_source(BP_ROUTE_SOURCE_SCENERY);
+    logMsg(BP_INFO_LOG "Scenery route %d of %d loaded: %d position(s), %u "
+        "segment(s)", index, n, np, (unsigned)list_count(&bp.segs));
     return (B_TRUE);
 }
 

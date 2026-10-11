@@ -197,6 +197,10 @@ BetterPushback registers these X-Plane commands:
   automatic physical-disconnect sequence.
 - `BetterPushback/cab_camera`: View from the tug cab.
 - `BetterPushback/recreate_scenery_routes`: Recreate scenery routes from WED files.
+- `BetterPushback/load_scenery_route`: Use a scenery route that starts where
+  the aircraft stands (see README-EXTERNAL-API.md, version 15).
+- `BetterPushback/preposition`: Bring the tug to the aircraft to wait, not yet
+  connected; `connect_first` then calls it in.
 - `BetterPushback/preference`: Open the preference window.
 - `BetterPushback/reload`: Reload BetterPushback (disabled if pushback is running,
   the planner is open, or the preferences window is active).

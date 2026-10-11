@@ -23,6 +23,7 @@ for runner in \
     run_ui_click_sound_tests.sh \
     run_ground_ops_window_state_tests.sh \
     run_planner_cache_tests.sh \
+    run_scenery_route_tests.sh \
     run_tow_session_tests.sh \
     run_vehicle_physics_tests.sh \
     run_wing_walker_logic_tests.sh

@@ -22,11 +22,25 @@
 #include <acfutils/avl.h>
 #include <acfutils/types.h>
 
+#include "scenery_route.h"
+
 #ifdef    __cplusplus
 extern "C" {
 #endif
 
-void xlate_wedroutes(void);
+/*
+ * Converts each scenery's earth.wed.xml into BetterPushback_routes.dat beside
+ * it, when the project is newer than the file or `force` is set.
+ */
+void xlate_wedroutes(bool_t force);
+
+/*
+ * The converted scenery routes that start where the aircraft stands (within
+ * BP_SCENERY_ROUTE_MAX_DIST_M and BP_SCENERY_ROUTE_MAX_HDG_DEG), nearest
+ * first. Returns how many were put in `out` (at most `max`).
+ */
+int scenery_routes_near(double lat, double lon, double hdg,
+    bp_scenery_route_t *out, int max);
 
 #ifdef    __cplusplus
 }
