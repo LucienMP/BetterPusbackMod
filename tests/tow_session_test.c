@@ -87,6 +87,25 @@ test_tows_are_not_saved_and_have_no_wing_walker(void)
     assert(tow_session_allows_persistent_routes());
 }
 
+static void
+test_recovery_rules(void)
+{
+    assert(tow_session_recovery_refused(true, true) == NULL);
+    assert(strstr(tow_session_recovery_refused(false, true), "nose gear"));
+    assert(strstr(tow_session_recovery_refused(true, false), "pavement"));
+    /* Slow: recovery's own cap, or a lower one another plugin set. */
+    assert(tow_session_limit(TOW_KIND_RECOVERY, 0.0) == TOW_RECOVERY_SPEED_LIMIT);
+    assert(tow_session_limit(TOW_KIND_RECOVERY, 5.0) == TOW_RECOVERY_SPEED_LIMIT);
+    assert(tow_session_limit(TOW_KIND_RECOVERY, 0.5) == 0.5);
+    assert(tow_session_limit(TOW_KIND_HANGAR, 0.0) == 0.0);
+    assert(tow_session_limit(TOW_KIND_HANGAR, 3.0) == 3.0);
+    /* Chocks hold the aircraft for the tug only on a recovery. */
+    assert(tow_session_aircraft_held(TOW_KIND_RECOVERY, false, true));
+    assert(!tow_session_aircraft_held(TOW_KIND_HANGAR, false, true));
+    assert(tow_session_aircraft_held(TOW_KIND_HANGAR, true, false));
+    assert(!tow_session_aircraft_held(TOW_KIND_RECOVERY, false, false));
+}
+
 int
 main(void)
 {
@@ -95,6 +114,7 @@ main(void)
     test_the_state_follows_the_controller();
     test_the_speed_limit_caps_the_tug();
     test_tows_are_not_saved_and_have_no_wing_walker();
+    test_recovery_rules();
     printf("tow session tests passed\n");
     return (0);
 }

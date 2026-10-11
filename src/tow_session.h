@@ -74,6 +74,21 @@ double tow_session_speed_cap(double tug_max, double limit);
 /* Storage for bp/tow_speed_limit (the dataref writes it directly). */
 float *tow_session_speed_limit(void);
 
+/*
+ * Recovery of a disabled aircraft (kind 7, version 11): refused when the nose
+ * gear is not down on its wheels or the aircraft is off the pavement (it is
+ * then lifted or moved by other means); the tug connects with only chocks
+ * holding the aircraft when its brakes have failed; slow.
+ */
+#define TOW_RECOVERY_SPEED_LIMIT 2.0   /* m/s, deflated tyres and failed brakes */
+const char *tow_session_recovery_refused(bool nose_gear_on_wheels,
+    bool on_pavement);
+/* The speed limit in force (0: none): another plugin's, and recovery's own. */
+double tow_session_limit(int kind, double limit);
+/* The aircraft is held for the tug to connect: the parking brake, or on a
+ * recovery the chocks alone. */
+bool tow_session_aircraft_held(int kind, bool parking_brake, bool chocked);
+
 /* A tow route is never saved as a stand's route; no wing walker on tows. */
 bool tow_session_allows_persistent_routes(void);
 bool tow_session_allows_wing_walker(void);

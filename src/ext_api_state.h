@@ -17,7 +17,7 @@ extern "C" {
 #endif
 
 /* Raised whenever the published interface gains something (never lowered). */
-#define BP_EXT_API_VERSION 10
+#define BP_EXT_API_VERSION 11
 
 #define BP_EXT_NAME_LEN 32
 

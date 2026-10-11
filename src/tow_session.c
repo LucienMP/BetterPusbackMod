@@ -127,3 +127,30 @@ tow_session_allows_wing_walker(void)
 {
     return (!session.active);
 }
+
+const char *
+tow_session_recovery_refused(bool nose_gear_on_wheels, bool on_pavement)
+{
+    if (!nose_gear_on_wheels)
+        return ("the nose gear is not on its wheels: the aircraft must be "
+            "lifted before it can be towed");
+    if (!on_pavement)
+        return ("the aircraft is off the pavement: it must be moved back onto "
+            "it before it can be towed");
+    return (NULL);
+}
+
+double
+tow_session_limit(int kind, double limit)
+{
+    if (kind == TOW_KIND_RECOVERY &&
+        (limit <= 0 || limit > TOW_RECOVERY_SPEED_LIMIT))
+        return (TOW_RECOVERY_SPEED_LIMIT);
+    return (limit);
+}
+
+bool
+tow_session_aircraft_held(int kind, bool parking_brake, bool chocked)
+{
+    return (parking_brake || (kind == TOW_KIND_RECOVERY && chocked));
+}

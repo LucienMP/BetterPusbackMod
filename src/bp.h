@@ -102,6 +102,7 @@ typedef struct {
     /* Stopped, or stopping, at a route's hold point until continue_tow. */
     bool_t hold_point;
     bool_t hold_point_held;
+    bool_t emergency_stop;       /* the hold is an emergency stop */
     char hold_point_text[96];
     bool_t stop_from_pause_hold;
     bool_t awaiting_plan;
@@ -247,6 +248,11 @@ pushback_step_t bp_current_step(void);
 /* At (or stopping at) a hold point of the route, and why it holds. */
 bool_t bp_hold_point_active(void);
 const char *bp_hold_point_text(void);
+/* Why a recovery tow cannot be done here, or NULL. */
+const char *bp_recovery_refused(void);
+/* Stops the push or tow at once, the tug kept connected, held until
+ * continue_tow; false with the reason when nothing is moving. */
+bool_t bp_emergency_stop(char *reason, size_t reason_len);
 /* Goes on from the hold point; false with the reason when not holding. */
 bool_t bp_continue_from_hold(char *reason, size_t reason_len);
 

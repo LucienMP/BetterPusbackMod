@@ -80,6 +80,7 @@
 #define    NORMAL_DECEL        0.17    /* m/s^2 */
 #define    BRAKE_PEDAL_THRESH    0.03    /* brake pedal angle, 0..1 */
 #define    FORCE_PER_TON        5000    /* max push force per ton, Newtons */
+#define    EMERGENCY_DECEL        4.0    /* m/s^2: an emergency stop, 2 m from 4 m/s */
 
 /* The tug's own forward and reverse speeds (m/s), kept for a tow's limit. */
 static double tug_max_fwd_spd = MAX_FWD_SPEED;
@@ -2513,9 +2514,11 @@ bp_run_push(bool_t hold_requested) {
                 /*
                  * Keep running route and steering control while slowing so
                  * segment progress and legacy steering remain continuous.
-                 * Only the longitudinal target is replaced with zero.
+                 * Only the longitudinal target is replaced with zero. An
+                 * emergency stop brakes as hard as the tug can.
                  */
-                push_at_speed(0, bp.veh.max_decel, B_TRUE, B_TRUE);
+                push_at_speed(0, bp.emergency_stop ? EMERGENCY_DECEL :
+                    bp.veh.max_decel, B_TRUE, B_TRUE);
             } else {
                 push_at_speed(speed, bp.veh.max_accel, B_TRUE, decel);
             }
@@ -2719,6 +2722,40 @@ bp_hold_point_text(void)
     return (bp_hold_point_active() ? bp.hold_point_text : "");
 }
 
+const char *
+bp_recovery_refused(void)
+{
+    double deploy[10] = { 0 };
+    int on_grass[10] = { 0 };
+    dr_t on_grass_dr;
+    bool_t wheels, pavement = B_TRUE;
+
+    if (!inited || bp.acf.nw_i < 0)
+        return ("BetterPushback cannot work with this aircraft");
+    dr_getvf(&drs.gear_deploy, deploy, 0, 10);
+    wheels = deploy[bp.acf.nw_i] > 0.99;
+    if (dr_find(&on_grass_dr, "sim/flightmodel2/gear/on_grass")) {
+        dr_getvi(&on_grass_dr, on_grass, 0, 10);
+        pavement = (on_grass[bp.acf.nw_i] == 0);
+    }
+    return (tow_session_recovery_refused(wheels, pavement));
+}
+
+bool_t
+bp_emergency_stop(char *reason, size_t reason_len)
+{
+    if (!bp_started || bp.step != PB_STEP_PUSHING) {
+        (void)snprintf(reason, reason_len, "nothing is being pushed or towed");
+        return (B_FALSE);
+    }
+    bp.hold_point = B_TRUE;
+    bp.hold_point_held = B_FALSE;
+    bp.emergency_stop = B_TRUE;
+    strlcpy(bp.hold_point_text, "emergency stop", sizeof (bp.hold_point_text));
+    logMsg(BP_WARN_LOG "Emergency stop requested by another plugin");
+    return (B_TRUE);
+}
+
 bool_t
 bp_continue_from_hold(char *reason, size_t reason_len)
 {
@@ -2732,6 +2769,7 @@ bp_continue_from_hold(char *reason, size_t reason_len)
         bp.hold_point_text);
     bp.hold_point = B_FALSE;
     bp.hold_point_held = B_FALSE;
+    bp.emergency_stop = B_FALSE;
     bp.hold_point_text[0] = '\0';
     msg_speak(MSG_SPOKEN_TOW_CROSSING, line);
     logMsg(BP_INFO_LOG "Continuing from the hold point");
@@ -2927,6 +2965,29 @@ pb_step_driving_up_close(void) {
     }
 }
 
+/* Any wheel chocked in X-Plane (a recovery tow may be held by chocks alone). */
+static bool_t
+acf_chocked(void)
+{
+    static dr_t is_chocked;
+    static bool_t found = B_FALSE, looked = B_FALSE;
+    int chocked[10] = { 0 };
+    int n;
+
+    if (!looked) {
+        found = dr_find(&is_chocked, "sim/flightmodel2/gear/is_chocked");
+        looked = B_TRUE;
+    }
+    if (!found)
+        return (B_FALSE);
+    n = dr_getvi(&is_chocked, chocked, 0, 10);
+    for (int i = 0; i < n; i++) {
+        if (chocked[i] != 0)
+            return (B_TRUE);
+    }
+    return (B_FALSE);
+}
+
 static void
 pb_step_waiting_for_pbrake(void) {
     vect2_t p_end, dir;
@@ -2939,7 +3000,9 @@ pb_step_waiting_for_pbrake(void) {
          */
         if (!slave_mode && !cfg_ignore_park_break)
             brakes_set(B_TRUE);
-    } else if ((!pbrake_is_set() && !cfg_ignore_park_break) ||
+    } else if ((!tow_session_aircraft_held(tow_session_is_active() ?
+        tow_session_kind() : TOW_KIND_NONE, pbrake_is_set(), acf_chocked()) &&
+        !cfg_ignore_park_break) ||
         /* wait until the rdy2conn message has stopped playing */
         bp.cur_t - bp.last_voice_t < msg_dur_effective(MSG_RDY2CONN)) {
         /* keep resetting the start time to enforce a delay */
@@ -3333,10 +3396,11 @@ pb_step_pushing(void) {
 
     /* A tow's speed limit (bp/tow_speed_limit) may change at any time. */
     if (tow_session_is_active()) {
-        bp.veh.max_fwd_spd = tow_session_speed_cap(tug_max_fwd_spd,
+        double limit = tow_session_limit(tow_session_kind(),
             *tow_session_speed_limit());
-        bp.veh.max_rev_spd = tow_session_speed_cap(tug_max_rev_spd,
-            *tow_session_speed_limit());
+
+        bp.veh.max_fwd_spd = tow_session_speed_cap(tug_max_fwd_spd, limit);
+        bp.veh.max_rev_spd = tow_session_speed_cap(tug_max_rev_spd, limit);
     }
 
     if (bp.pause_requested || bp.hold_point) {

@@ -33,7 +33,7 @@ a pilot who uses it on its own.
 
 | Dataref | Type | Meaning |
 | --- | --- | --- |
-| `bp/api_version` | int | Interface version (this document: 10) |
+| `bp/api_version` | int | Interface version (this document: 11) |
 | `bp/state_seq` | int | Changes whenever a value below changes |
 | `bp/started` | int | An operation is running (existing dataref) |
 | `bp/emergency_tow` | int | The running operation is the Emergency Tow |
@@ -485,6 +485,27 @@ stays connected and waits until it is told to go on.
   While held, `BetterPushback/stop` ends the operation where it stands, as
   from a pause.
 
+## Version 11: recovery and the emergency stop
+
+**Recovering a disabled aircraft** (`bp/tow_kind` 7, `recovery`): an
+aircraft stuck on a runway with burst tyres or failed brakes.
+
+- `call_tow` refuses a recovery, with the reason, when the nose gear is not
+  down on its wheels ("the aircraft must be lifted before it can be towed")
+  or the nose wheel is off the pavement. Those are jobs for other equipment.
+- With failed brakes the parking brake may not hold. On a recovery the tug
+  connects with only the chocks holding the aircraft
+  (`sim/flightmodel2/gear/is_chocked`, any wheel). The chocks are removed as
+  the tow starts, as for any push (version 7).
+- A recovery goes no faster than 2 m/s (deflated tyres), or slower if
+  `bp/tow_speed_limit` says so.
+
+**The emergency stop**: a fuel spill, a fire or a vehicle in the way.
+
+| Command | Meaning |
+| --- | --- |
+| `BetterPushback/emergency_stop` | Stop the push or tow at once: the tug brakes as hard as it can (about 2 m from tow speed) and stays connected. It then holds as at a hold point: `bp/hold` 1, `bp/hold_reason` "emergency stop", `bp/tow_state` 3. `BetterPushback/continue_tow` goes on; `BetterPushback/stop` ends the operation where it stands. Answered like `load_route`; refused, with the reason, when nothing is being pushed or towed |
+
 ## Testing
 
 ### Unit tests
@@ -510,8 +531,9 @@ All run as part of `tests/run_all_tests.sh`:
   ground channel.
 - `tests/run_tow_session_tests.sh` checks the tows' fixed numbers and names,
   the refusals with their reasons, the state following the controller (and
-  staying done or failed after a tow), the speed limit, and that tows are not
-  saved and have no wing walker.
+  staying done or failed after a tow), the speed limit, that tows are not
+  saved and have no wing walker, and the recovery rules (refusals, the 2 m/s
+  cap, chocks instead of the parking brake).
 - `tests/run_ext_api_route_tests.sh` checks reading and writing route text:
   comments, line endings, every kind of bad input refused with a reason that
   names the line, the position limit (64), waypoints facing the next position,

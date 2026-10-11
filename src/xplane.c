@@ -996,6 +996,11 @@ bp_tow_call(int kind, const bp_ext_pose_t *poses, int n, char *reason,
         (void)snprintf(reason, reason_len, "the preferences window is open");
         return (B_FALSE);
     }
+    if (kind == TOW_KIND_RECOVERY &&
+        (refused = bp_recovery_refused()) != NULL) {
+        (void)snprintf(reason, reason_len, "%s", refused);
+        return (B_FALSE);
+    }
     (void)bp_cam_stop();
     if (!bp_route_load_external(poses, n, reason, reason_len))
         return (B_FALSE);
