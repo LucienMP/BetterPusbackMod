@@ -4526,6 +4526,19 @@ main_intf(bool_t force_hide) {
 
 static void
 pb_step_waiting4ok2disco(void) {
+    /*
+     * Another plugin holds the tug connected after the push (version 16):
+     * nothing is disconnected until it lets go; the pilot's or the automatic
+     * approval is asked for afterwards as usual.
+     */
+    if (bp_ext_handoff_holds_connected()) {
+        disco_intf_hide();
+        bp_hint_status_str = bp_ext_handoff_hold_status();
+        bp_blocker = BP_BLOCKER_HELD_CONNECTED;
+        bp.ok2disco = B_FALSE;
+        bp.step_start_t = bp.cur_t;
+        return;
+    }
     if (bp_post_push_should_auto_disconnect(cfg_disco_when_done != B_FALSE,
         slave_mode != B_FALSE, bp.ok2disco != B_FALSE)) {
         bp.ok2disco = B_TRUE;

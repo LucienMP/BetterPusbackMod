@@ -33,7 +33,7 @@ a pilot who uses it on its own.
 
 | Dataref | Type | Meaning |
 | --- | --- | --- |
-| `bp/api_version` | int | Interface version (this document: 15) |
+| `bp/api_version` | int | Interface version (this document: 16) |
 | `bp/state_seq` | int | Changes whenever a value below changes |
 | `bp/started` | int | An operation is running (existing dataref) |
 | `bp/emergency_tow` | int | The running operation is the Emergency Tow |
@@ -206,6 +206,7 @@ part of the operation state: `bp/state_seq` moves when they change.
 | 4 | `plan_required` | A push route is planned |
 | 5 | `external` | Another plugin clears its blocker (version 13); `bp/status_text` has its words |
 | 6 | `chocks` | The chocks are removed by the plugin that owns them (version 13) |
+| 7 | `held_connected` | After the push, another plugin holds the tug connected (version 16); `bp/status_text` has its words |
 
 The item kind is a best guess from the dataref's name. Aircraft without a
 `BetterPushback_doors.cfg` entry are checked with X-Plane's own doors and
@@ -439,6 +440,7 @@ only at a stand.
 | 5 | `remote_stand` | to a remote stand |
 | 6 | `runup_area` | to the engine run-up area |
 | 7 | `recovery` | a disabled aircraft (version 11 adds its rules) |
+| 8 | `tow_in` | on arrival, into a stand that cannot be taxied into (version 16); the wing walker guides it as on a push |
 
 - The route is fitted from where the aircraft stands, as `load_route` does: a
   position behind it is reached by pushing, one ahead by towing. A route that
@@ -448,8 +450,8 @@ only at a stand.
   disconnects and drives away. `BetterPushback/stop` ends it at any time.
 - `call_tow` is refused, with the reason, while another push or tow runs, in
   shared-cockpit slave mode, with the preferences open, and when the kind is
-  not 1 to 7. A tow route is never saved as a stand's route, and the wing
-  walker stays away, as for Emergency Tow.
+  not 1 to 8. A tow route is never saved as a stand's route, and the wing
+  walker stays away, as for Emergency Tow, except on a tow-in.
 - `bp/tow_state` stays `done` or `failed` after a tow until the next one.
 
 ```c
@@ -628,6 +630,32 @@ saved slots came. They are now a third source beside the two slots.
   sceneries rarely include their `earth.wed.xml`, so this mostly serves
   sceneries made or edited locally.
 
+## Version 16: more ways to leave a stand
+
+Real operations have more than one way to leave a stand.
+
+| Dataref | Type | Written by | Meaning |
+| --- | --- | --- | --- |
+| `bp/hold_connected` | int, writable | the other plugin | 1: after the push the tug stays connected and nothing is disconnected until it is set back to 0 (de-icing at the stand exit, a cross-bleed engine start) |
+| `bp/hold_connected_text` | byte[96], writable | the other plugin | Why, in its words; shown as "Holding connected: ..." in `bp/status_text` and the panel |
+
+- While held, `bp/blocker` reads 7 `held_connected` and the disconnect is not
+  offered to the pilot; any approval given before is asked for again after.
+  The automatic disconnect (the pilot's preference) follows the release.
+- Set it before or during the push; it acts when the push has stopped.
+- A tow into a stand on arrival is tow kind 8 `tow_in` (see version 9).
+
+Already possible, and so described here rather than changed:
+
+- **Engines started at the stand before the push** (an inoperative APU, a
+  start with the air start unit): the engines may run when the tug connects
+  on aircraft with more than one engine or with jet engines; BetterPushback's
+  doors and GPU/ASU check waits only for the ASU to be disconnected, which
+  is done after the start.
+- **Push and pull** (push back, then tow forward to line up): a route whose
+  last position is ahead of the one before it, from `load_route` or the
+  planner.
+
 ## Testing
 
 ### Unit tests
@@ -655,6 +683,10 @@ All run as part of `tests/run_all_tests.sh`:
   default, that an external blocker holds the connection and the start with
   the other plugin's words (a text it did not terminate is cut), and that
   chocks and walkers left to the other plugin behave as described.
+- `tests/run_ext_api_handoff_tests.sh` also checks that the tug held
+  connected after the push says why, in the other plugin's words or plainly,
+  and blocks nothing before; `tests/run_tow_session_tests.sh` that a tow-in
+  keeps the wing walker and other tows do not.
 - `tests/run_scenery_route_tests.sh` checks that a converted route file is
   read and a broken route in it left out, that only routes starting at the
   aircraft are offered, nearest first, and that the route passes the end of

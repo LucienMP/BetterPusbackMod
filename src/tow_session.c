@@ -5,7 +5,7 @@
 
 static const char *const kind_names[TOW_KIND_COUNT] = {
     "none", "return_to_stand", "reposition", "hangar", "isolated_position",
-    "remote_stand", "runup_area", "recovery"
+    "remote_stand", "runup_area", "recovery", "tow_in"
 };
 
 static const char *const state_names[] = {
@@ -37,7 +37,7 @@ tow_session_refused(int kind, bool started, bool slave_mode,
     bool emergency_tow_active)
 {
     if (kind <= TOW_KIND_NONE || kind >= TOW_KIND_COUNT)
-        return ("unknown tow kind: set bp/tow_kind to 1-7");
+        return ("unknown tow kind: set bp/tow_kind to 1-8");
     if (slave_mode)
         return ("the tow is called from the other cockpit (shared cockpit)");
     if (emergency_tow_active || session.active)
@@ -125,7 +125,8 @@ tow_session_allows_persistent_routes(void)
 bool
 tow_session_allows_wing_walker(void)
 {
-    return (!session.active);
+    /* Into a stand the wing walker guides the tow as on a push. */
+    return (!session.active || session.kind == TOW_KIND_TOW_IN);
 }
 
 const char *

@@ -213,7 +213,8 @@ typedef enum {
     BP_BLOCKER_RELEASE_PARKING_BRAKE,
     BP_BLOCKER_PLAN_REQUIRED,
     BP_BLOCKER_EXTERNAL,                /* another plugin's (version 13) */
-    BP_BLOCKER_CHOCKS                   /* chocked, chocks are another plugin's */
+    BP_BLOCKER_CHOCKS,                  /* chocked, chocks are another plugin's */
+    BP_BLOCKER_HELD_CONNECTED           /* held connected after the push (version 16) */
 } bp_blocker_t;
 
 bp_blocker_t bp_current_blocker(void);

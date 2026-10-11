@@ -28,9 +28,10 @@ typedef enum {
     TOW_KIND_ISOLATED_POSITION = 4,
     TOW_KIND_REMOTE_STAND = 5,
     TOW_KIND_RUNUP_AREA = 6,
-    TOW_KIND_RECOVERY = 7
+    TOW_KIND_RECOVERY = 7,
+    TOW_KIND_TOW_IN = 8         /* into a stand that cannot be taxied into (version 16) */
 } tow_kind_t;
-#define TOW_KIND_COUNT 8
+#define TOW_KIND_COUNT 9
 
 /* Published numbers (bp/tow_state). */
 typedef enum {

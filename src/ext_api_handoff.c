@@ -8,7 +8,7 @@
 #define BLOCKER_CHOCKS 6
 
 static bp_ext_handoff_t handoff;
-static char status[BP_EXT_HANDOFF_TEXT_LEN + 16];
+static char status[BP_EXT_HANDOFF_TEXT_LEN + 24];
 
 bp_ext_handoff_t *
 bp_ext_handoff(void)
@@ -48,6 +48,26 @@ bool
 bp_ext_handoff_draws_walker(bool would)
 {
     return (would && handoff.walkers_external == 0);
+}
+
+bool
+bp_ext_handoff_holds_connected(void)
+{
+    return (handoff.hold_connected != 0);
+}
+
+const char *
+bp_ext_handoff_hold_status(void)
+{
+    /* The text is written by another plugin: never trusted to be terminated. */
+    handoff.hold_text[sizeof (handoff.hold_text) - 1] = '\0';
+    if (handoff.hold_text[0] != '\0')
+        (void)snprintf(status, sizeof (status), "Holding connected: %s",
+            handoff.hold_text);
+    else
+        (void)snprintf(status, sizeof (status),
+            "Holding connected for the ground crew");
+    return (status);
 }
 
 const char *

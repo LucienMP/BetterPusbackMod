@@ -15,6 +15,7 @@ test_kinds_and_states_have_fixed_names(void)
     assert(strcmp(tow_kind_name(TOW_KIND_REMOTE_STAND), "remote_stand") == 0);
     assert(strcmp(tow_kind_name(TOW_KIND_RUNUP_AREA), "runup_area") == 0);
     assert(strcmp(tow_kind_name(TOW_KIND_RECOVERY), "recovery") == 0);
+    assert(strcmp(tow_kind_name(TOW_KIND_TOW_IN), "tow_in") == 0);
     assert(strcmp(tow_kind_name(99), "none") == 0);
     assert(TOW_STATE_IDLE == 0 && TOW_STATE_CONNECTING == 1 && TOW_STATE_TOWING == 2 &&
         TOW_STATE_HOLDING == 3 && TOW_STATE_DONE == 4 && TOW_STATE_FAILED == 5);
@@ -28,7 +29,8 @@ test_a_tow_is_refused_with_a_reason(void)
     tow_session_reset();
     assert(tow_session_refused(TOW_KIND_REPOSITION, false, false, false) == NULL);
     assert(strstr(tow_session_refused(0, false, false, false), "bp/tow_kind"));
-    assert(strstr(tow_session_refused(8, false, false, false), "bp/tow_kind"));
+    assert(strstr(tow_session_refused(9, false, false, false), "bp/tow_kind"));
+    assert(tow_session_refused(TOW_KIND_TOW_IN, false, false, false) == NULL);
     assert(strstr(tow_session_refused(2, false, true, false), "shared cockpit"));
     assert(strstr(tow_session_refused(2, false, false, true), "already"));
     assert(strstr(tow_session_refused(2, true, false, false), "already under way"));
@@ -106,9 +108,23 @@ test_recovery_rules(void)
     assert(!tow_session_aircraft_held(TOW_KIND_RECOVERY, false, false));
 }
 
+static void
+test_a_tow_in_keeps_the_wing_walker(void)
+{
+    tow_session_reset();
+    assert(tow_session_begin(TOW_KIND_TOW_IN));
+    assert(tow_session_allows_wing_walker());
+    assert(!tow_session_allows_persistent_routes());
+    tow_session_finish(true);
+    assert(tow_session_begin(TOW_KIND_REPOSITION));
+    assert(!tow_session_allows_wing_walker());
+    tow_session_finish(true);
+}
+
 int
 main(void)
 {
+    test_a_tow_in_keeps_the_wing_walker();
     test_kinds_and_states_have_fixed_names();
     test_a_tow_is_refused_with_a_reason();
     test_the_state_follows_the_controller();

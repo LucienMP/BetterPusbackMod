@@ -53,12 +53,37 @@ test_chocks_and_walkers_belong_to_the_other_plugin(void)
     assert(!bp_ext_handoff_draws_walker(true));
 }
 
+static void
+test_the_tug_held_connected_after_the_push(void)
+{
+    bp_ext_handoff_t *h;
+
+    bp_ext_handoff_reset();
+    assert(!bp_ext_handoff_holds_connected());
+    h = bp_ext_handoff();
+    h->hold_connected = 1;
+    assert(bp_ext_handoff_holds_connected());
+    (void)snprintf(h->hold_text, sizeof (h->hold_text),
+        "de-icing at the stand exit");
+    assert(strcmp(bp_ext_handoff_hold_status(),
+        "Holding connected: de-icing at the stand exit") == 0);
+    h->hold_text[0] = '\0';
+    assert(strcmp(bp_ext_handoff_hold_status(),
+        "Holding connected for the ground crew") == 0);
+    memset(h->hold_text, 'x', sizeof (h->hold_text));
+    assert(strlen(bp_ext_handoff_hold_status()) < sizeof (h->hold_text) + 24);
+    /* Holding connected does not block the connection or the start. */
+    assert(!bp_ext_handoff_blocks_connect());
+    assert(bp_ext_handoff_start_blocker(false) == 0);
+}
+
 int
 main(void)
 {
     test_nothing_changes_by_default();
     test_an_external_blocker_holds_the_connection_and_the_start();
     test_chocks_and_walkers_belong_to_the_other_plugin();
+    test_the_tug_held_connected_after_the_push();
     printf("ext_api_handoff tests passed\n");
     return (0);
 }

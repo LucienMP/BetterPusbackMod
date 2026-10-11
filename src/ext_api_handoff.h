@@ -10,6 +10,9 @@
  *   tug connects; a chocked aircraft then blocks the push start.
  * - The wing walker: the other plugin draws its own walkers, so
  *   BetterPushback draws none and says when one is needed.
+ * - Holding connected (version 16): after the push the tug stays connected
+ *   until the other plugin lets it go (de-icing at the stand exit, a
+ *   cross-bleed start).
  *
  * The storage the writable datarefs point at, and the decisions; no XPLM
  * dependencies (tests/ext_api_handoff_test.c).
@@ -33,6 +36,8 @@ typedef struct {
     char owner[BP_EXT_HANDOFF_OWNER_LEN];  /* bp/external_block_owner */
     int chocks_external;                   /* bp/chocks_external */
     int walkers_external;                  /* bp/walkers_external */
+    int hold_connected;                    /* bp/hold_connected */
+    char hold_text[BP_EXT_HANDOFF_TEXT_LEN];   /* bp/hold_connected_text */
 } bp_ext_handoff_t;
 
 bp_ext_handoff_t *bp_ext_handoff(void);
@@ -49,6 +54,12 @@ bool bp_ext_handoff_draws_walker(bool would);
 /* The status line while the other plugin blocks ("Waiting: belt loader at
  * the aft hold"); its text, or a plain one. */
 const char *bp_ext_handoff_status(void);
+/* After the push the tug stays connected: not disconnected, even when the
+ * pilot or the automatic disconnect approves it. */
+bool bp_ext_handoff_holds_connected(void);
+/* The status line meanwhile ("Holding connected: de-icing at the stand
+ * exit"); its text, or a plain one. */
+const char *bp_ext_handoff_hold_status(void);
 
 #ifdef __cplusplus
 }

@@ -81,6 +81,8 @@ static dr_t msg_channel_dr;
 static dr_t external_block_dr, external_block_text_dr, external_block_owner_dr;
 static dr_t chocks_external_dr, walkers_external_dr, walkers_needed_dr,
     pin_shown_dr;
+/* Version 16: the tug held connected after the push. */
+static dr_t hold_connected_dr, hold_connected_text_dr;
 static int walkers_needed = 0, pin_shown = 0;
 static dr_t voice_mode_dr;
 static dr_t voice_done_seq_dr;
@@ -144,6 +146,8 @@ blocker_public(bp_blocker_t blocker)
         return (BP_EXT_BLOCKER_EXTERNAL);
     case BP_BLOCKER_CHOCKS:
         return (BP_EXT_BLOCKER_CHOCKS);
+    case BP_BLOCKER_HELD_CONNECTED:
+        return (BP_EXT_BLOCKER_HELD_CONNECTED);
     case BP_BLOCKER_NONE:
     default:
         return (BP_EXT_BLOCKER_NONE);
@@ -234,6 +238,10 @@ ext_api_init(void)
             "bp/chocks_external");
         dr_create_i(&walkers_external_dr, &h->walkers_external, B_TRUE,
             "bp/walkers_external");
+        dr_create_i(&hold_connected_dr, &h->hold_connected, B_TRUE,
+            "bp/hold_connected");
+        dr_create_b(&hold_connected_text_dr, h->hold_text,
+            sizeof (h->hold_text), B_TRUE, "bp/hold_connected_text");
     }
     dr_create_i(&walkers_needed_dr, &walkers_needed, B_FALSE,
         "bp/walkers_needed");
@@ -322,6 +330,8 @@ ext_api_fini(void)
     dr_delete(&external_block_owner_dr);
     dr_delete(&chocks_external_dr);
     dr_delete(&walkers_external_dr);
+    dr_delete(&hold_connected_dr);
+    dr_delete(&hold_connected_text_dr);
     dr_delete(&walkers_needed_dr);
     dr_delete(&pin_shown_dr);
     dr_delete(&api_version_dr);
